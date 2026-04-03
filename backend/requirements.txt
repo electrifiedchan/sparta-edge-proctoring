@@ -1,0 +1,13 @@
+fastapi
+uvicorn[standard]
+python-dotenv
+pydantic
+requests
+pypdf
+google-generativeai
+deepgram-sdk
+python-multipart
+pdf2image
+Pillow
+websockets
+pipecat-ai[silero,deepgram,groq]

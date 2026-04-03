@@ -1,0 +1,510 @@
+import os
+import shutil
+import re
+import base64
+import io
+import time
+import logging
+import asyncio
+from collections import OrderedDict
+
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import Response, StreamingResponse
+from pydantic import BaseModel, field_validator
+from typing import List, Optional
+from dotenv import load_dotenv
+
+# --- S.P.A.R.T.A. PIPECAT IMPORTS ---
+from pipecat.pipeline.pipeline import Pipeline
+from pipecat.pipeline.runner import PipelineRunner
+from pipecat.pipeline.task import PipelineParams, PipelineTask
+from pipecat.transports.websocket.fastapi import (
+    FastAPIWebsocketTransport,
+    FastAPIWebsocketParams,
+)
+
+from pipecat.audio.vad.silero import SileroVADAnalyzer
+from pipecat.audio.vad.vad_analyzer import VADParams
+from pipecat.frames.frames import LLMMessagesFrame
+
+# FIXED: Import paths updated for Pipecat 0.0.107+
+from pipecat.services.deepgram.stt import DeepgramSTTService
+from pipecat.services.deepgram.tts import DeepgramTTSService
+from pipecat.services.groq.llm import GroqLLMService
+
+from pipecat.processors.aggregators.llm_context import LLMContext
+from pipecat.processors.aggregators.llm_response_universal import (
+    LLMContextAggregatorPair,
+    LLMUserAggregatorParams
+)
+
+# NEW IMPORT FOR STEP 4: Raw Async Groq for the background Judge
+from groq import AsyncGroq
+
+import ingest_github
+import ingest_pdf
+import brain
+
+load_dotenv()
+
+# --- LOGGING ---
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+app = FastAPI()
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+DB = {}
+REPO_CACHE = LRUCache(max_size=50, ttl_seconds=3600) if 'LRUCache' in globals() else {}
+
+# --- LRU CACHE WITH TTL ---
+class LRUCache:
+    def __init__(self, max_size: int = 50, ttl_seconds: int = 3600):
+        self.cache = OrderedDict()
+        self.max_size = max_size
+        self.ttl = ttl_seconds  
+        self.timestamps = {}
+
+    def get(self, key: str):
+        if key not in self.cache:
+            return None
+        if time.time() - self.timestamps[key] > self.ttl:
+            self.delete(key)
+            return None
+        self.cache.move_to_end(key)
+        return self.cache[key]
+
+    def set(self, key: str, value):
+        if key in self.cache:
+            self.cache.move_to_end(key)
+            self.cache[key] = value
+            self.timestamps[key] = time.time()
+            return
+        while len(self.cache) >= self.max_size:
+            oldest_key = next(iter(self.cache))
+            self.delete(oldest_key)
+        self.cache[key] = value
+        self.timestamps[key] = time.time()
+
+    def delete(self, key: str):
+        if key in self.cache:
+            del self.cache[key]
+            del self.timestamps[key]
+
+    def clear(self):
+        self.cache.clear()
+        self.timestamps.clear()
+
+    def __contains__(self, key: str):
+        return self.get(key) is not None
+
+    def __len__(self):
+        return len(self.cache)
+
+REPO_CACHE = LRUCache(max_size=50, ttl_seconds=3600)
+
+class ChatRequest(BaseModel):
+    message: str
+    history: List[dict] = []
+
+class RepoRequest(BaseModel):
+    github_url: str
+
+    @field_validator('github_url')
+    @classmethod
+    def validate_github_url(cls, v: str) -> str:
+        if not v or not v.strip():
+            raise ValueError('GitHub URL is required')
+        v = v.strip()
+        if 'github.com' not in v.lower():
+            raise ValueError('Must be a valid GitHub URL (e.g., https://github.com/user/repo)')
+        pattern = r'(https?://)?(www\.)?github\.com/[\w\-\.]+/[\w\-\.]+'
+        if not re.match(pattern, v, re.IGNORECASE):
+            raise ValueError('Invalid GitHub URL format')
+        return v
+
+ALLOWED_FILE_EXTENSIONS = {'.pdf'}
+MAX_FILE_SIZE_MB = 10
+
+def validate_file_upload(file: UploadFile) -> tuple[bool, str]:
+    if not file or not file.filename:
+        return False, "No file provided"
+    ext = os.path.splitext(file.filename)[1].lower()
+    if ext not in ALLOWED_FILE_EXTENSIONS:
+        return False, f"Invalid file type. Allowed: {', '.join(ALLOWED_FILE_EXTENSIONS)}"
+    return True, ""
+
+def extract_github_details(url):
+    if not url:
+        return None, None, None
+    clean = url.replace("https://", "").replace("http://", "").replace("github.com/", "")
+    parts = clean.split("/")
+    if len(parts) < 2:
+        return None, None, None
+    owner = parts[0]
+    repo = parts[1]
+    branch = None
+    if "tree" in parts:
+        try:
+            tree_index = parts.index("tree")
+            if len(parts) > tree_index + 1:
+                branch = parts[tree_index + 1]
+        except:
+            pass
+    return owner, repo, branch
+
+@app.get("/")
+def health_check():
+    return {"status": "S.P.A.R.T.A. System Online", "mode": "Adversarial"}
+
+
+# ============ S.P.A.R.T.A. STREAMING PIPELINE ============
+
+@app.websocket("/ws/sparta-interview")
+async def websocket_endpoint(websocket: WebSocket):
+    await websocket.accept()
+    print("⚡ S.P.A.R.T.A. WebSocket Connected. Initializing Split-Brain Architecture...")
+    
+    # Initialize the raw async client for the background 70B Judge
+    groq_async_client = AsyncGroq(api_key=os.getenv("GROQ_API_KEY"))
+    
+    try:
+        transport = FastAPIWebsocketTransport(
+            websocket=websocket,
+            params=FastAPIWebsocketParams(
+                audio_in_enabled=True,
+                audio_out_enabled=True,
+                add_wav_header=False,
+                vad_enabled=True,
+                vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.3)),
+                vad_audio_passthrough=True,
+            )
+        )
+
+        stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
+        tts = DeepgramTTSService(api_key=os.getenv("DEEPGRAM_API_KEY"), voice="aura-asteria-en")
+        llm = GroqLLMService(api_key=os.getenv("GROQ_API_KEY"), model="llama3-8b-8192")
+
+        system_prompt = "You are S.P.A.R.T.A., a ruthless, elite technical interviewer. Keep responses under 2 sentences. Be highly critical. If the INTERVIEW_DIRECTOR gives you an attack vector, use it immediately against the candidate."
+        
+        context = LLMContext([{"role": "system", "content": system_prompt}])
+        
+        context_aggregator = LLMContextAggregatorPair(
+            context=context,
+            user_params=LLMUserAggregatorParams(
+                aggregation_timeout=0.5,
+                enable_emulated_vad_interruptions=False
+            )
+        )
+
+        runner = PipelineRunner()
+        
+        pipeline = Pipeline([
+            transport.input(),
+            stt,
+            context_aggregator.user(),
+            llm,
+            tts,
+            transport.output(),
+            context_aggregator.assistant(),
+        ])
+        
+        task = PipelineTask(pipeline, PipelineParams(allow_interruptions=True))
+        
+        # --- THE 70B ASYNC JUDGE LOOP ---
+        async def judge_loop():
+            print("⚖️ 70B Async Judge activated in background.")
+            last_processed_index = 0
+            
+            while True:
+                await asyncio.sleep(1.0) # Check memory every second
+                messages = context.get_messages()
+                
+                # Check if there is a new user message
+                if len(messages) > last_processed_index:
+                    last_msg = messages[-1]
+                    
+                    # Only judge if the last message was the user, and it wasn't one of our injected system commands
+                    if last_msg["role"] == "user" and "[INTERVIEW_DIRECTOR]" not in last_msg.get("content", ""):
+                        print("⚖️ Judge analyzing candidate's logic...")
+                        try:
+                            # Non-blocking 70B call
+                            response = await groq_async_client.chat.completions.create(
+                                model="llama3-70b-8192",
+                                messages=[
+                                    {"role": "system", "content": "You are a senior principal engineer evaluating a candidate. The candidate just spoke. Provide a brutal, 1-sentence technical follow-up question exposing a flaw in their logic. Do not be polite."},
+                                    {"role": "user", "content": last_msg["content"]}
+                                ],
+                                max_tokens=150,
+                                temperature=0.7
+                            )
+                            
+                            judge_feedback = response.choices[0].message.content
+                            print(f"🔥 Judge Attack Vector: {judge_feedback}")
+                            
+                            # Silently inject the feedback into the 8B's memory for the NEXT turn
+                            context.add_message({
+                                "role": "user", 
+                                "content": f"[INTERVIEW_DIRECTOR]: Use this attack vector on the candidate next: {judge_feedback}"
+                            })
+                            
+                        except Exception as e:
+                            print(f"⚠️ Judge Error: {e}")
+                    
+                    # Update our tracker so we don't judge the same message twice
+                    last_processed_index = len(context.get_messages())
+
+        # Start the background judge just before the pipeline
+        asyncio.create_task(judge_loop())
+        # ---------------------------------
+
+        @transport.event_handler("on_client_connected")
+        async def on_client_connected(transport, client):
+            print("🎙️ Client active. Sending Opening Shot...")
+            messages = [{"role": "system", "content": system_prompt}, {"role": "user", "content": "Introduce yourself aggressively."}]
+            await task.queue_frames([LLMMessagesFrame(messages)])
+
+        print("🚀 Hot-Path Pipeline starting...")
+        await runner.run(task)
+        
+    except WebSocketDisconnect:
+        print("🔴 S.P.A.R.T.A. WebSocket Disconnected")
+    except Exception as e:
+        print(f"❌ Pipeline Error: {e}")
+
+
+# ============ CORE ENDPOINTS (Legacy Retained for Context Pre-loading) ============
+
+@app.post("/validate_resume")
+async def validate_resume(file: UploadFile = File(...)):
+    is_valid, error_msg = validate_file_upload(file)
+    if not is_valid:
+        return {"valid": False, "reason": error_msg}
+
+    logger.info(f"🛡️ Gatekeeper BYPASSED for testing: {file.filename}")
+    
+    # FORCING THE GATE OPEN: We will rewrite the Gemini PDF parser to use Groq later.
+    return {"valid": True, "reason": ""}
+
+    logger.info(f"🛡️ Gatekeeper checking: {file.filename}")
+    temp_filename = f"temp_validate_{file.filename}"
+
+    try:
+        with open(temp_filename, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+
+        resume_text = ingest_pdf.parse_pdf(temp_filename)
+        is_resume, rejection_reason = brain.validate_is_resume(resume_text)
+
+        if is_resume:
+            logger.info(f"✅ Gatekeeper approved: {file.filename}")
+            return {"valid": True, "reason": ""}
+        else:
+            logger.warning(f"❌ Gatekeeper rejected: {rejection_reason}")
+            return {"valid": False, "reason": rejection_reason}
+
+    except Exception as e:
+        logger.error(f"❌ Gatekeeper error: {e}")
+        return {"valid": False, "reason": f"Error processing file: {str(e)}"}
+    finally:
+        if os.path.exists(temp_filename):
+            os.remove(temp_filename)
+
+@app.post("/extract_projects")
+async def extract_projects(file: UploadFile = File(...)):
+    is_valid, error_msg = validate_file_upload(file)
+    if not is_valid:
+        logger.warning(f"Invalid file upload: {error_msg}")
+        raise HTTPException(status_code=400, detail=error_msg)
+
+    logger.info(f"📥 Extracting projects from resume: {file.filename}")
+    temp_filename = f"temp_{file.filename}"
+
+    try:
+        with open(temp_filename, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+
+        resume_text = ingest_pdf.parse_pdf(temp_filename)
+        is_valid, rejection_reason = brain.validate_is_resume(resume_text)
+        if not is_valid:
+            logger.warning(f"❌ Document rejected: {rejection_reason}")
+            raise HTTPException(status_code=400, detail=rejection_reason)
+
+        projects = brain.extract_projects_from_resume(resume_text)
+        DB['pending_resume'] = resume_text
+
+        return {
+            "status": "success",
+            "projects": projects,
+            "resume_preview": resume_text[:500] + "..."
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Error extracting projects: {e}")
+        return {"status": "error", "message": str(e)}
+    finally:
+        if os.path.exists(temp_filename):
+            os.remove(temp_filename)
+
+@app.post("/analyze")
+async def analyze_portfolio(
+    file: UploadFile = File(...),
+    github_url: Optional[str] = Form(None),
+    project_name: Optional[str] = Form(None)
+):
+    is_valid, error_msg = validate_file_upload(file)
+    if not is_valid:
+        logger.warning(f"Invalid file upload: {error_msg}")
+        raise HTTPException(status_code=400, detail=error_msg)
+
+    if github_url and github_url.strip() and github_url != "null":
+        github_url = github_url.strip()
+        if 'github.com' not in github_url.lower():
+            raise HTTPException(status_code=400, detail="Invalid GitHub URL format")
+
+    logger.info(f"📥 Received Analysis Request.")
+    logger.info(f"   📁 Selected Project: {project_name or 'None specified'}")
+    temp_filename = f"temp_{file.filename}"
+    with open(temp_filename, "wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
+
+    try:
+        resume_text = ingest_pdf.parse_pdf(temp_filename)
+        is_valid, rejection_reason = brain.validate_is_resume(resume_text)
+        if not is_valid:
+            logger.warning(f"❌ Document rejected: {rejection_reason}")
+            raise HTTPException(status_code=400, detail=rejection_reason)
+
+        target_url = github_url if github_url and github_url != "null" and github_url.strip() else None
+
+        if target_url:
+            print(f"   🎯 Using selected project URL: {target_url}")
+        else:
+            print(f"   ⚠️ No GitHub URL provided - analyzing resume claims only (PHANTOMWARE CHECK)")
+
+        code_context = ""
+        if target_url:
+            owner, repo, branch = extract_github_details(target_url)
+            if owner and repo:
+                cache_key = f"{owner}/{repo}/{branch}"
+                cached = REPO_CACHE.get(cache_key)
+                if cached:
+                    logger.info(f"   ⚡ Cache Hit: {cache_key}")
+                    code_context = cached
+                else:
+                    logger.info(f"   💻 Target: {owner}/{repo} (Branch: {branch or 'Auto'})")
+                    code_context = ingest_github.fetch_repo_content(owner, repo, branch)
+                    if code_context and len(code_context) > 100:
+                        REPO_CACHE.set(cache_key, code_context)
+            else:
+                code_context = "Error: Invalid URL extracted."
+        else:
+            code_context = "⚠️ NO CODE PROVIDED. This project has NO GitHub link. All claims are UNVERIFIED and should be flagged as potential PHANTOMWARE."
+
+        if os.path.exists(temp_filename):
+            os.remove(temp_filename)
+
+        analysis_json = brain.analyze_resume_vs_code(resume_text, code_context, project_name)
+        
+        import json
+        try:
+            data = json.loads(analysis_json)
+            critique = "\n".join([f"- {x}" for x in data.get("project_critique", [])])
+            claims = "\n".join([f"- {x}" for x in data.get("false_claims", [])])
+            suggestions = "\n".join([f"- {x}" for x in data.get("resume_suggestions", [])])
+            
+            chat_msg = f"**REAL WORLD CRITIQUE:**\n{critique}\n\n**FALSE CLAIMS / VERIFICATION:**\n{claims}\n\n**RESUME ADDITIONS:**\n{suggestions}"
+        except:
+            chat_msg = "Analysis Complete. Check Dashboard for details."
+
+        DB['current_user'] = {
+            "resume": resume_text,
+            "code": code_context[:50000],
+            "analysis": analysis_json
+        }
+
+        return {
+            "status": "success",
+            "data": analysis_json,
+            "initial_chat": chat_msg
+        }
+
+    except Exception as e:
+        print(f"❌ Error: {e}")
+        return {"status": "error", "message": str(e)}
+    finally:
+        if os.path.exists(temp_filename):
+            os.remove(temp_filename)
+
+@app.post("/add_repo")
+async def add_repo_context(request: RepoRequest):
+    print(f"📥 Adding Repo: {request.github_url}")
+    try:
+        owner, repo, branch = extract_github_details(request.github_url)
+        if not owner or not repo:
+             raise HTTPException(status_code=400, detail="Invalid GitHub URL")
+        
+        cache_key = f"{owner}/{repo}/{branch}"
+        cached = REPO_CACHE.get(cache_key)
+        if cached:
+            logger.info(f"   ⚡ Cache Hit: {cache_key}")
+            code_context = cached
+        else:
+            logger.info(f"   💻 Fetching: {owner}/{repo} (Branch: {branch or 'Default'})")
+            code_context = ingest_github.fetch_repo_content(owner, repo, branch)
+            if code_context and len(code_context) >= 100:
+                REPO_CACHE.set(cache_key, code_context)
+
+        if not code_context or len(code_context) < 100:
+            return {"status": "error", "bullets": "⚠️ ACCESS DENIED: Repo is empty, Private, or Branch not found."}
+
+        bullets = brain.generate_star_bullets(code_context)
+
+        if 'current_user' in DB:
+            DB['current_user']['code'] += f"\n\n--- NEW REPO: {repo} ---\n{code_context[:20000]}"
+
+        return {"status": "success", "bullets": bullets}
+
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+@app.post("/interview_start")
+async def start_interview():
+    user_data = DB.get('current_user')
+    if not user_data:
+        return {"status": "error", "message": "No data found."}
+    question = brain.generate_interview_challenge(user_data['code'], user_data['analysis'])
+    return {"status": "success", "question": question}
+
+@app.post("/chat")
+async def chat_endpoint(request: ChatRequest):
+    user_data = DB.get('current_user')
+    if not user_data:
+        return {"response": "⚠️ SYSTEM ERROR: No data found."}
+
+    context_summary = f"--- RESUME ---\n{user_data['resume'][:1000]}...\n--- CODE EVIDENCE ---\n{user_data['code']}"
+
+    gemini_history = [] 
+    for msg in request.history:
+        role = "user" if msg['type'] == 'user' else "model"
+        gemini_history.append({"role": role, "parts": [msg['text']]})
+
+    response_text = brain.get_chat_response(gemini_history, request.message, context_summary)
+    return {"response": response_text}
+
+@app.post("/generate_resume")
+async def generate_resume_endpoint():
+    user_data = DB.get('current_user')
+    if not user_data:
+        return {"response": "⚠️ ERROR: No data found."}
+    new_resume = brain.generate_ats_resume(user_data['resume'], user_data['code'])
+    return {"status": "success", "resume": new_resume}
