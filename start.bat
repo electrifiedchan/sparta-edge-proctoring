@@ -49,14 +49,20 @@ echo.
 echo  [1] Launching The Brain (Python Backend)...
 echo      - Activating virtual environment
 echo      - Starting FastAPI server on port 8000
-start "GitReal Backend" cmd /k "cd /d "%~dp0backend" && call venv\Scripts\activate.bat && python -m uvicorn main:app --reload --port 8000"
+start "GitReal Backend" /D "%~dp0backend" cmd /k "call venv\Scripts\activate.bat && python -m uvicorn main:app --reload --port 8000"
 
 timeout /t 3 /nobreak >nul
 
 echo.
 echo  [2] Launching The Face (Next.js Frontend)...
 echo      - Starting Next.js dev server on port 3000
-start "GitReal Frontend" cmd /k "cd /d "%~dp0frontend" && pnpm dev"
+start "GitReal Frontend" /D "%~dp0frontend" cmd /k "pnpm dev"
+
+echo.
+timeout /t 10 /nobreak >nul
+
+echo  [3] Launching Browser...
+start http://localhost:3000
 
 echo.
 echo  ========================================================

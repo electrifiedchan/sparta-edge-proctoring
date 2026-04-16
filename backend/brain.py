@@ -19,9 +19,9 @@ except Exception as e:
     logger.error(f"❌ Failed to initialize Groq client: {e}")
     groq_client = None
 
-# Model Routing
-HEAVY_MODEL = "llama3-70b-8192"  # For deep analysis, roasts, and rewriting
-FAST_MODEL = "llama-3.1-8b-instant"    # For fast gatekeeping and JSON extraction
+# 🚀 UPGRADED MODEL ROUTING
+HEAVY_MODEL = "llama-3.3-70b-versatile"  # Flagship Llama 3.3 for deep reasoning/adversarial roasts
+FAST_MODEL = "llama-3.1-8b-instant"      # Ultra-fast 8B for JSON extraction and gatekeeping
 
 def validate_is_resume(text_content):
     """
@@ -77,33 +77,67 @@ def extract_projects_from_resume(resume_text):
         logger.error(f"Failed to extract projects: {e}")
         return []
 
-def analyze_resume_vs_code(resume_text, code_context, project_name=None):
-    """The 'Roast' Function using LLaMA 70B."""
+def analyze_resume_vs_code(resume_text, code_context, project_name=None, job_description: str = ""):
+    """The 'Roast' Function using LLaMA 3.3 70B - Upgraded to S.P.A.R.T.A. Combat Readiness Simulator"""
     no_code_provided = "NO CODE PROVIDED" in code_context or len(code_context) < 100
     
     if no_code_provided and project_name:
         return json.dumps({
-            "credibility_score": 0,
-            "verdict": f"Project '{project_name}' is PHANTOMWARE - zero code evidence provided.",
-            "matches": [],
-            "red_flags": [f"🚩 PHANTOMWARE: Project '{project_name}' has NO GitHub link - all claims are unverified."],
-            "missing_gems": [],
-            "summary": "Cannot verify any claims. Credibility: 0/100"
+            "combat_readiness_score": 0,
+            "verdict": f"Project '{project_name}' is PHANTOMWARE.",
+            "ats_metrics": {
+                "keyword_match_rate": 0,
+                "quantification_rate": 0,
+                "missing_critical_skills": ["Code Evidence"]
+            },
+            "sections": {
+                "experience": { "score": 0, "roast": "Cannot verify claims without code." },
+                "skills": { "score": 0, "roast": "Cannot verify tech stack without code." },
+                "formatting": { "score": 0, "roast": "Irrelevant until code is provided." },
+                "ats_compatibility": { "score": 0, "roast": "Failed validation." }
+            },
+            "faang_attack_vectors": [
+                {"trigger_claim": "Claimed to build a project", "attack_question": "Explain why you didn't provide code for this project."}
+            ]
         })
 
     project_focus = f"FOCUS ONLY ON PROJECT: {project_name}" if project_name else ""
+    jd_focus = f"JOB DESCRIPTION: {job_description}\n\n" if job_description else "JOB DESCRIPTION: Generic Senior Software Engineer Role\n\n"
     current_date = datetime.now().strftime("%B %d, %Y")
     
     prompt = f"""
-    You are 'GitReal', a ruthless Forensic Resume Auditor.
+    You are S.P.A.R.T.A., an elite, ruthless Technical Interviewer, FAANG Senior Engineer, and ATS filtering system evaluator.
     DATE: {current_date}
     {project_focus}
+    {jd_focus}
     
     RESUME CLAIMS: {resume_text[:4000]}
     CODE EVIDENCE: {code_context[:30000]}
     
-    Audit Protocol: Check for Seniority mismatch, keyword stuffing, and outdated tech. Be brutal.
-    Return strict JSON with exactly these keys: "credibility_score" (number 0-100), "verdict" (string), "matches" (list of strings), "red_flags" (list of strings), "missing_gems" (list of strings), "summary" (string).
+    Audit Protocol: Compare the grand claims in the resume to the actual reality of the code and the demands of the Job Description. 
+    Act as an ATS filtering system AND a FAANG Senior Engineer.
+    Calculate a Keyword Match Rate against the JD, a Quantification Rate (what % of bullets have numbers/metrics), and identify missing critical skills.
+    
+    Return STRICT JSON matching this exact schema. DO NOT wrap in markdown blocks like ```json:
+    {{
+        "combat_readiness_score": (0-100),
+        "verdict": "(Brutal 3-5 word summary of their chances)",
+        "ats_metrics": {{
+            "keyword_match_rate": (0-100),
+            "quantification_rate": (0-100),
+            "missing_critical_skills": ["...", "..."]
+        }},
+        "sections": {{
+            "experience": {{"score": (0-100), "roast": "(Brutal critique of their work history vs code and JD)"}},
+            "skills": {{"score": (0-100), "roast": "(Critique of listed tech stack vs actual code usage and JD)"}},
+            "formatting": {{"score": (0-100), "roast": "(Critique of resume layout/clarity)"}},
+            "ats_compatibility": {{"score": (0-100), "roast": "(Will an ATS robot read this easily?)"}}
+        }},
+        "faang_attack_vectors": [
+            {{"trigger_claim": "(e.g., 'Used React')", "attack_question": "(e.g., 'Explain the fiber reconciliation algorithm')"}},
+            {{"trigger_claim": "(e.g., 'Led a team')", "attack_question": "(Amazon Leadership Principle attack)"}}
+        ]
+    }}
     """
     try:
         completion = groq_client.chat.completions.create(
@@ -115,10 +149,21 @@ def analyze_resume_vs_code(resume_text, code_context, project_name=None):
         return completion.choices[0].message.content
     except Exception as e:
         logger.error(f"Analysis failed: {e}")
-        return json.dumps({"verdict": "Error analyzing project", "red_flags": [str(e)], "matches": [], "missing_gems": [], "credibility_score": 0})
+        return json.dumps({
+            "combat_readiness_score": 0, 
+            "verdict": "System Failure", 
+            "ats_metrics": {"keyword_match_rate": 0, "quantification_rate": 0, "missing_critical_skills": []},
+            "sections": {
+                "experience": {"score": 0, "roast": "Error analyzing resume."},
+                "skills": {"score": 0, "roast": "Error analyzing skills."},
+                "formatting": {"score": 0, "roast": "Error analyzing formatting."},
+                "ats_compatibility": {"score": 0, "roast": "Error analyzing compatibility."}
+            }, 
+            "faang_attack_vectors": []
+        })
 
 def generate_star_bullets(code_context):
-    prompt = f"Act as a Senior Tech Recruiter. Write 3 powerful STAR method resume bullets based on this raw code:\n{code_context[:30000]}"
+    prompt = f"Act as an elite Tech Recruiter. Write 3 powerful STAR method resume bullets based on this raw code:\n{code_context[:30000]}"
     try:
         completion = groq_client.chat.completions.create(
             model=HEAVY_MODEL,
@@ -130,11 +175,18 @@ def generate_star_bullets(code_context):
         return f"Error generating bullets: {e}"
 
 def get_chat_response(history, message, context):
-    """Translates Gemini history format back to Groq format for the text chat UI."""
-    system_prompt = f"You are Morpheus from The Matrix. Speak in metaphors about code and reality.\nCONTEXT:\n{context}"
+    """Text chat UI upgraded to S.P.A.R.T.A. Llama 3.3 70B Heavy Reasoning"""
+    
+    # Dynamic System Prompt to handle both Red Pill (Roast) and Blue Pill (Rewrite) optimally.
+    system_prompt = f"""You are S.P.A.R.T.A., an elite AI engineering architect. 
+    If the user asks for a resume rewrite or improvement, provide highly technical, ATS-optimized, metrics-driven bullet points. 
+    If the user is answering an interview question or arguing code logic, act as a ruthless, aggressive CTO and brutally challenge their logic. 
+    Be concise. Do not use pleasantries.
+    CONTEXT:
+    {context}"""
+    
     messages = [{"role": "system", "content": system_prompt}]
     
-    # Map Gemini format from main.py back to standard OpenAI/Groq format
     for msg in history:
         role = "assistant" if msg["role"] == "model" else "user"
         content = msg["parts"][0]
@@ -144,21 +196,21 @@ def get_chat_response(history, message, context):
     
     try:
         completion = groq_client.chat.completions.create(
-            model=FAST_MODEL,
+            model=HEAVY_MODEL, 
             messages=messages,
             temperature=0.7
         )
         return completion.choices[0].message.content
     except Exception as e:
-        return f"The Matrix is glitching... {e}"
+        return f"System Malfunction... {e}"
 
 def generate_interview_challenge(code_context, analysis_json):
     prompt = f"""
-    Act as a ruthless CTO conducting a stress interview. 
+    Act as a ruthless CTO conducting a high-pressure technical interview. 
     ANALYSIS: {analysis_json}
     CODE: {code_context[:10000]}
     
-    Look at the red flags. If there is phantomware, attack it. Give me a 1 sentence, highly aggressive technical question. No greetings.
+    Look at the red flags. If there is phantomware, attack it. If the code is weak, call it out. Give me a 1 sentence, highly aggressive technical question based exactly on their code or claims. No greetings. No pleasantries.
     """
     try:
         completion = groq_client.chat.completions.create(
@@ -185,3 +237,51 @@ def generate_ats_resume(resume_text, code_context):
         return completion.choices[0].message.content
     except Exception as e:
         return f"Error: {e}"
+
+def reconstruct_resume(resume_text: str):
+    system_prompt = """
+    You are S.P.A.R.T.A., an elite FAANG resume reconstructor.
+    Convert the provided resume text into 3 powerful bullet points.
+    
+    ABSOLUTE RULES:
+    1. Use the XYZ Formula: Accomplished [X] as measured by [Y], by doing [Z].
+    2. NEVER invent metrics, percentages, or technologies.
+    3. If a metric is missing, use a bracketed placeholder like 🔴[X]% or 🔴[Metric].
+    4. Start every bullet with a Tier-1 action verb (e.g., Architected, Engineered, Spearheaded).
+    
+    Output strictly in this JSON format:
+    {
+      "bullets": [
+        {
+          "original": "Short summary of what they said",
+          "enhanced": "The FAANG-grade XYZ bullet with placeholders"
+        }
+      ]
+    }
+    """
+    
+    try:
+        completion = groq_client.chat.completions.create(
+            model=HEAVY_MODEL, # Correct Groq's lightning-fast 70B model
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": resume_text}
+            ],
+            temperature=0.3,
+            response_format={"type": "json_object"}
+        )
+        
+        # Parse the JSON response safely
+        raw_content = completion.choices[0].message.content.strip()
+        return json.loads(raw_content)
+        
+    except Exception as e:
+        print(f"❌ S.P.A.R.T.A. LLM ERROR: {str(e)}")
+        return {
+            "bullets": [
+                {
+                    "original": "Failed to parse context.", 
+                    "enhanced": f"ERROR RECONSTRUCTING: {str(e)}"
+                }
+            ]
+        }

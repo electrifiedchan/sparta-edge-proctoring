@@ -112,16 +112,13 @@ def analyze_with_groq(document_text: str, groq_key: str) -> str:
 
 # --- EXECUTION ENGINE ---
 if __name__ == "__main__":
-    # ⚠️ PASTE YOUR REAL API KEYS HERE ⚠️
-    from dotenv import load_dotenv
-    load_dotenv()
-    NVIDIA_API_KEY = os.getenv("NVIDIA_API_KEY")
-    GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+    NVIDIA_API_KEY = os.getenv("NVIDIA_API_KEY", "YOUR_NVIDIA_API_KEY")
+    GROQ_API_KEY = os.getenv("GROQ_API_KEY", "YOUR_GROQ_API_KEY")
 
     LOCAL_PDF = "test.pdf"
 
-    if not NVIDIA_API_KEY or not GROQ_API_KEY:
-        print("❌ Error: API keys missing. Add them to .env file.")
+    if "YOUR_" in NVIDIA_API_KEY or "YOUR_" in GROQ_API_KEY:
+        print("❌ Error: API keys missing. Paste your real keys before running.")
     else:
         try:
             start_time = time.time()

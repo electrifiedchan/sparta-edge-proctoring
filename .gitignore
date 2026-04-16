@@ -39,6 +39,7 @@ Desktop.ini
 *.log
 *.tmp
 temp_*
+scratch_*
 *.webm
 test.pdf
 
