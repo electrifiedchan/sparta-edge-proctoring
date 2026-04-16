@@ -11,3 +11,5 @@ pdf2image
 Pillow
 websockets
 pipecat-ai[silero,deepgram,groq]
+PyMuPDF
+groq
