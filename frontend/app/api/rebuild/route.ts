@@ -4,7 +4,8 @@ export async function POST(req: Request) {
   try {
     const { resumeText } = await req.json();
 
-    const response = await fetch("http://localhost:8000/rebuild", {
+    const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
+    const response = await fetch(`${backendUrl}/rebuild`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ resume_text: resumeText }),

@@ -6,7 +6,8 @@ export async function POST(req: Request) {
     const body = await req.json();
     const { message, history, context } = body;
 
-    const response = await axios.post("http://localhost:8000/chat", {
+    const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
+    const response = await axios.post(`${backendUrl}/chat`, {
       message,
       history,
       context,

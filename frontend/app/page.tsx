@@ -91,7 +91,7 @@ const PROCESSING_MESSAGES = [
 ];
 
 const MAX_FILE_SIZE_MB = 10;
-const API_URL = "http://localhost:8000/analyze";
+const API_URL = `${process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000"}/analyze`;
 
 // ─────────────────────────────────────────────────
 // useCountUp Hook
