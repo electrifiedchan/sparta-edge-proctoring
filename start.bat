@@ -1,5 +1,5 @@
 @echo off
-title GitReal - Matrix Command Center
+title GitReal - Matrix Command Center                                   
 color 0A
 cls
 echo.
@@ -15,6 +15,11 @@ echo.
 echo   M A T R I X   R E S U M E   V E R I F I C A T I O N
 echo  ========================================================
 echo.
+
+echo  [SYSTEM CHECK] Cleaning up stale caches and legacy processes...
+taskkill /FI "WINDOWTITLE eq GitReal*" /F >nul 2>&1
+if exist "frontend\.next" rmdir /s /q "frontend\.next"
+
 echo  [SYSTEM CHECK] Verifying components...
 echo.
 
@@ -48,8 +53,8 @@ echo  [OK] All components verified
 echo.
 echo  [1] Launching The Brain (Python Backend)...
 echo      - Activating virtual environment
-echo      - Starting FastAPI server on port 8000
-start "GitReal Backend" /D "%~dp0backend" cmd /k "call venv\Scripts\activate.bat && python -m uvicorn main:app --reload --port 8000"
+echo      - Starting FastAPI server explicitly on IPv4 (127.0.0.1:8000)
+start "GitReal Backend" /D "%~dp0backend" cmd /k "call venv\Scripts\activate.bat && python -m uvicorn main:app --host 127.0.0.1 --port 8000 --reload"
 
 timeout /t 3 /nobreak >nul
 
@@ -69,9 +74,9 @@ echo  ========================================================
 echo   [SUCCESS] GitReal Systems Online
 echo  ========================================================
 echo.
-echo   Backend API:  http://localhost:8000
+echo   Backend API:  http://127.0.0.1:8000
 echo   Frontend UI:  http://localhost:3000
-echo   API Docs:     http://localhost:8000/docs
+echo   API Docs:     http://127.0.0.1:8000/docs
 echo.
 echo  ========================================================
 echo   Press any key to close this window

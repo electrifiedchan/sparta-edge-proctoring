@@ -110,7 +110,7 @@ GitReal is an AI-powered resume verification tool that cross-references your res
 
 4. **Create `.env` file:**
    ```env
-   GEMINI_API_KEY=your_gemini_api_key_here
+   GROQ_API_KEY=your_groq_api_key_here
    DEEPGRAM_API_KEY=your_deepgram_api_key_here
    GITHUB_TOKEN=your_github_token_here  # Optional
    ```
@@ -260,14 +260,15 @@ Responds in voice interview
 **Analysis fails:**
 - Verify GitHub URL is public or token is valid
 - Check resume PDF is not corrupted
-- Ensure Gemini API key is valid and has quota
+- Ensure Groq API key is valid and has quota
 
 ## 📝 Environment Variables
 
 ### Backend `.env`
 ```env
-GEMINI_API_KEY=your_gemini_api_key
+GROQ_API_KEY=your_groq_api_key
 DEEPGRAM_API_KEY=your_deepgram_api_key
+NVIDIA_API_KEY=your_nvidia_api_key
 GITHUB_TOKEN=your_github_token  # Optional, for private repos
 ```
 
