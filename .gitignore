@@ -42,6 +42,7 @@ temp_*
 scratch_*
 *.webm
 test.pdf
+explaination.md
 
 # Build outputs
 out/

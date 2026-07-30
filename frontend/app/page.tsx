@@ -381,7 +381,7 @@ function SectionCard({ sectionKey, data, delay, visible }: SectionCardProps) {
 // ─────────────────────────────────────────────────
 // Sticky Nav Bar
 // ─────────────────────────────────────────────────
-function StickyNav() {
+function StickyNav({ onReset }: { onReset?: () => void }) {
   const [time, setTime] = useState("");
 
   useEffect(() => {
@@ -395,12 +395,26 @@ function StickyNav() {
     <div className="sticky top-0 z-50 bg-black/80 backdrop-blur-md border-b border-neutral-800">
       <div className="max-w-7xl mx-auto px-6 h-14 flex items-center justify-between">
         {/* Left */}
-        <div className="flex items-center gap-2">
-          <Zap className="w-4 h-4 text-white" />
-          <span className="text-sm font-bold tracking-widest text-white uppercase">
-            S.P.A.R.T.A.
-          </span>
-        </div>
+        {onReset ? (
+          <button
+            onClick={onReset}
+            className="flex items-center gap-2 cursor-pointer hover:opacity-80 transition-all group focus:outline-none"
+            title="Return to Home"
+          >
+            <Zap className="w-4 h-4 text-green-400 group-hover:scale-110 transition-transform" />
+            <span className="text-sm font-bold tracking-widest text-white uppercase group-hover:text-green-400 transition-colors">
+              S.P.A.R.T.A.
+            </span>
+          </button>
+        ) : (
+          <div className="flex items-center gap-2">
+            <Zap className="w-4 h-4 text-white" />
+            <span className="text-sm font-bold tracking-widest text-white uppercase">
+              S.P.A.R.T.A.
+            </span>
+          </div>
+        )}
+
         {/* Center */}
         <div className="flex items-center gap-2">
           <CheckCircle className="w-4 h-4 text-green-400" />
@@ -408,10 +422,22 @@ function StickyNav() {
             Audit Complete
           </span>
         </div>
+
         {/* Right */}
-        <div className="flex items-center gap-2 text-neutral-500 text-xs font-mono">
-          <Clock className="w-3.5 h-3.5" />
-          <span>{time}</span>
+        <div className="flex items-center gap-4">
+          {onReset && (
+            <button
+              onClick={onReset}
+              className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-neutral-900 border border-neutral-700 hover:border-green-500 text-xs font-mono text-neutral-300 hover:text-green-400 transition-all shadow-sm cursor-pointer"
+            >
+              <RefreshCcw className="w-3.5 h-3.5 text-green-400" />
+              <span>Return Home</span>
+            </button>
+          )}
+          <div className="hidden sm:flex items-center gap-2 text-neutral-500 text-xs font-mono">
+            <Clock className="w-3.5 h-3.5" />
+            <span>{time}</span>
+          </div>
         </div>
       </div>
     </div>
@@ -460,7 +486,7 @@ function RoastDashboard({
 
   return (
     <>
-      <StickyNav />
+      <StickyNav onReset={onReset} />
       <div
         className="max-w-7xl mx-auto w-full px-6 py-12 opacity-0 animate-[fadeIn_0.7s_ease_forwards]"
         style={{ animationFillMode: "forwards" }}
@@ -1160,6 +1186,9 @@ export default function HomePage() {
     setAppState("idle");
     setErrorMessage(null);
     setRoastData(null);
+    setUploadedFile(null);
+    setJobDescription("");
+    setJdError(false);
   }, []);
 
 // ── Render: Dashboard ────────────────────────
@@ -1244,27 +1273,29 @@ export default function HomePage() {
               <p className="text-xs font-mono tracking-[0.25em] text-neutral-600 uppercase">
                 Forensic Resume Auditor · AI-Powered
               </p>
-              <h1 className="text-4xl md:text-[3.25rem] font-semibold tracking-tight text-white leading-[1.15] min-h-[3.5rem] flex items-center justify-center">
-                <TextType
-                  as="span"
-                  text={[
-                    "Your resume is about to get destroyed.",
-                    "We expose every lie in your resume.",
-                    "Code doesn't lie. Your resume does.",
-                    "S.P.A.R.T.A. never shows mercy.",
-                    "Drop the PDF. Face the verdict.",
-                  ]}
-                  typingSpeed={45}
-                  deletingSpeed={25}
-                  pauseDuration={2200}
-                  showCursor
-                  cursorCharacter="_"
-                  cursorBlinkDuration={0.45}
-                  cursorClassName="text-neutral-500 font-light"
-                  className="text-white"
-                  loop
-                />
-              </h1>
+              <div className="min-h-[7.5rem] md:min-h-[8.5rem] flex items-start justify-center w-full px-2">
+                <h1 className="text-3xl sm:text-4xl md:text-[3.25rem] font-semibold tracking-tight text-white leading-[1.2] text-center max-w-3xl">
+                  <TextType
+                    as="span"
+                    text={[
+                      "Your resume is about to get destroyed.",
+                      "We expose every lie in your resume.",
+                      "Code doesn't lie. Your resume does.",
+                      "S.P.A.R.T.A. never shows mercy.",
+                      "Drop the PDF. Face the verdict.",
+                    ]}
+                    typingSpeed={45}
+                    deletingSpeed={25}
+                    pauseDuration={2200}
+                    showCursor
+                    cursorCharacter="_"
+                    cursorBlinkDuration={0.45}
+                    cursorClassName="text-neutral-500 font-light"
+                    className="text-white"
+                    loop
+                  />
+                </h1>
+              </div>
               <p className="text-sm text-neutral-500 tracking-wide max-w-md mx-auto leading-relaxed">
                 Upload your resume. Our AI cross-references every claim against
                 your actual GitHub code and issues a{" "}
