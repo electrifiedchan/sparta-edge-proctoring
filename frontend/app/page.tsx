@@ -1087,7 +1087,7 @@ export default function HomePage() {
       return;
     }
 
-    const fileCacheKey = `${file.name}-${file.size}-${file.lastModified}`;
+    const fileCacheKey = `${file.name}-${file.size}-${file.lastModified}-${jobDescription.trim()}`;
     const cachedData = LOCAL_CACHE.get(fileCacheKey);
     
     if (cachedData) {

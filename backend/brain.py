@@ -118,6 +118,16 @@ def analyze_resume_vs_code(resume_text, code_context, project_name=None, job_des
     Act as an ATS filtering system AND a FAANG Senior Engineer.
     Calculate a Keyword Match Rate against the JD, a Quantification Rate (what % of bullets have numbers/metrics), and identify missing critical skills.
     
+    CRITICAL SCORING RULES:
+    1. Evaluate the candidate dynamically and objectively based on actual code evidence and resume details.
+    2. Do NOT output a default or static score of 20. Differentiate scores fairly (e.g. 70-95 for strong candidates, 40-65 for average, 10-35 for weak).
+    3. Calculate combat_readiness_score dynamically reflecting the candidate's actual qualifications.
+    
+    CRITICAL RULES FOR "missing_critical_skills":
+    - "missing_critical_skills" MUST ONLY contain technical skills, tools, or requirements EXPLICITLY REQUIRED in the given JOB DESCRIPTION that are MISSING from the candidate's resume or code.
+    - Do NOT invent generic or random skills.
+    - If no Job Description is provided, or if the candidate already possesses all skills required by the Job Description, return an empty array [].
+    
     Return STRICT JSON matching this exact schema. DO NOT wrap in markdown blocks like ```json:
     {{
         "combat_readiness_score": (0-100),
@@ -146,7 +156,23 @@ def analyze_resume_vs_code(resume_text, code_context, project_name=None, job_des
             response_format={"type": "json_object"},
             temperature=0.3
         )
-        return completion.choices[0].message.content
+        raw_content = completion.choices[0].message.content
+        try:
+            data = json.loads(raw_content)
+            sections = data.get("sections", {})
+            exp_s = sections.get("experience", {}).get("score", 0)
+            skl_s = sections.get("skills", {}).get("score", 0)
+            fmt_s = sections.get("formatting", {}).get("score", 0)
+            ats_s = sections.get("ats_compatibility", {}).get("score", 0)
+            
+            # Recalculate dynamic weighted average if section scores are present
+            if any([exp_s, skl_s, fmt_s, ats_s]):
+                weighted = round(0.40 * exp_s + 0.30 * skl_s + 0.15 * fmt_s + 0.15 * ats_s)
+                data["combat_readiness_score"] = weighted
+                
+            return json.dumps(data)
+        except Exception:
+            return raw_content
     except Exception as e:
         logger.error(f"Analysis failed: {e}")
         return json.dumps({

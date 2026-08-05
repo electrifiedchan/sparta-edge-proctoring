@@ -1,4 +1,12 @@
 import os
+import sys
+
+# Ensure UTF-8 output encoding for Windows compatibility
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
 import shutil
 import re
 import base64
@@ -32,7 +40,7 @@ from pipecat.transports.websocket.fastapi import (
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.audio.vad.vad_analyzer import VADParams
-from pipecat.frames.frames import LLMMessagesFrame
+from pipecat.frames.frames import LLMMessagesUpdateFrame
 
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.deepgram.tts import DeepgramTTSService
@@ -267,7 +275,7 @@ async def websocket_endpoint(websocket: WebSocket):
         async def on_client_connected(transport, client):
             print("🎙️ Client active. Sending Opening Shot...")
             messages = [{"role": "system", "content": system_prompt}, {"role": "user", "content": "Introduce yourself aggressively."}]
-            await task.queue_frames([LLMMessagesFrame(messages)])
+            await task.queue_frames([LLMMessagesUpdateFrame(messages)])
 
         print("🚀 Hot-Path Pipeline starting...")
         await runner.run(task)
