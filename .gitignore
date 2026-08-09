@@ -43,7 +43,11 @@ scratch_*
 *.webm
 test.pdf
 test.txt
+todo.md
 explaination.md
+paper/
+measured.json
+measure.py
 
 # Build outputs
 out/

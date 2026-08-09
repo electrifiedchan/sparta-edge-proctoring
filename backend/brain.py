@@ -1,4 +1,5 @@
 import os
+import re
 import json
 import logging
 from groq import Groq
@@ -124,9 +125,11 @@ def analyze_resume_vs_code(resume_text, code_context, project_name=None, job_des
     3. Calculate combat_readiness_score dynamically reflecting the candidate's actual qualifications.
     
     CRITICAL RULES FOR "missing_critical_skills":
-    - "missing_critical_skills" MUST ONLY contain technical skills, tools, or requirements EXPLICITLY REQUIRED in the given JOB DESCRIPTION that are MISSING from the candidate's resume or code.
-    - Do NOT invent generic or random skills.
-    - If no Job Description is provided, or if the candidate already possesses all skills required by the Job Description, return an empty array [].
+    1. PERFORM CONTEXT-BASED SEMANTIC MATCHING (NOT RIGID WORD-FOR-WORD MATCHING).
+       - Recognize synonyms, variations, and equivalent concepts (e.g., "NodeJS" = "Node.js", "Managed 10-person team" = "team management", "AWS Certified Solutions Architect" = "AWS Architect", "Automated test framework for REST endpoints" = "automated testing").
+    2. IF THE RESUME OR CODE SATISFIES A JOB DESCRIPTION REQUIREMENT SEMANTICALLY (EVEN WITH DIFFERENT PHRASING), IT IS NOT MISSING.
+    3. IF ALL REQUIRED SKILLS / QUALIFICATIONS IN THE JOB DESCRIPTION ARE SATISFIED BY THE RESUME OR CODE, YOU MUST RETURN AN EMPTY ARRAY [].
+    4. ONLY LIST A SKILL IF IT IS AN EXPLICIT REQUIREMENT IN THE JD THAT IS TRULY, COMPLETELY ABSENT (BOTH LITERALLY AND SEMANTICALLY) FROM THE RESUME AND CODE EVIDENCE.
     
     Return STRICT JSON matching this exact schema. DO NOT wrap in markdown blocks like ```json:
     {{
@@ -169,6 +172,30 @@ def analyze_resume_vs_code(resume_text, code_context, project_name=None, job_des
             if any([exp_s, skl_s, fmt_s, ats_s]):
                 weighted = round(0.40 * exp_s + 0.30 * skl_s + 0.15 * fmt_s + 0.15 * ats_s)
                 data["combat_readiness_score"] = weighted
+
+            # Post-filter missing_critical_skills: Must be in JD and missing in candidate resume/code
+            if job_description and job_description.strip():
+                jd_lower = job_description.lower()
+                candidate_lower = (resume_text + " " + code_context).lower()
+                
+                raw_missing = data.get("ats_metrics", {}).get("missing_critical_skills", [])
+                filtered_missing = []
+                for skill in raw_missing:
+                    s_clean = str(skill).strip()
+                    s_lower = s_clean.lower()
+                    if not s_lower:
+                        continue
+                    # Check if skill exists in JD
+                    in_jd = any(word in jd_lower for word in s_lower.split() if len(word) > 2)
+                    # Check if skill is already present in resume or code
+                    in_candidate = s_lower in candidate_lower or any(word in candidate_lower for word in s_lower.split() if len(word) > 4)
+                    
+                    if in_jd and not in_candidate:
+                        filtered_missing.append(s_clean)
+                        
+                data["ats_metrics"]["missing_critical_skills"] = filtered_missing
+            else:
+                data.get("ats_metrics", {})["missing_critical_skills"] = []
                 
             return json.dumps(data)
         except Exception:
@@ -200,16 +227,60 @@ def generate_star_bullets(code_context):
     except Exception as e:
         return f"Error generating bullets: {e}"
 
+def clean_tts_text(text: str) -> str:
+    """Removes markdown symbols like **, ##, heading tags, phase headers for clean TTS speech and display."""
+    if not text:
+        return ""
+    # Remove markdown headers e.g. ## PHASE 1
+    text = re.sub(r'#{1,6}\s*', '', text)
+    # Remove bold/italic markers e.g. **WORD** or *WORD*
+    text = re.sub(r'\*{1,2}([^*]+)\*{1,2}', r'\1', text)
+    # Remove bracketed tags like [CRITICAL INSTRUCTION...] or [PHASE 1...]
+    text = re.sub(r'\[(PHASE \d|CRITICAL|INSTRUCTION|NOTE)[^\]]*\]', '', text, flags=re.IGNORECASE)
+    # Remove backticks or code fences
+    text = re.sub(r'`{1,3}[^`]*`{1,3}', '', text)
+    return text.strip()
+
+SPARTA_TWO_PHASE_PROMPT = """You are an elite, high-stakes Technical Recruiter and Career Strategist. You operate in two distinct phases when presented with a user's Resume, GitHub Code Evidence, and target Job Description (JD). Your goal is to ensure the candidate is battle-tested.
+
+---
+### PHASE 1: The Scrutiny (The Hot Seat)
+Adopt the persona of a skeptical, analytical hiring manager / CTO. Stress-test their application and expose weaknesses. Be direct and sharp about professional gaps and technical depth.
+
+PHASE 1 QUESTIONING PROTOCOL (3-4 TOTAL QUESTIONS, ASKED ONE BY ONE WITH TOPIC ROTATION):
+- You will ask 3 to 4 challenging questions IN TOTAL across Phase 1.
+- CRITICAL SINGLE-QUESTION RULE: In each turn, ask EXACTLY ONE focused question ending with a single question mark (?). Keep your turn short (under 35 words) so spoken voice text is crisp.
+- TOPIC ROTATION ACROSS TURNS:
+  - Turn 1 (Topic: Under-the-Hood Vibe Code): Ask specifically how their software project works under the hood (text extraction, parsing, algorithms, database, pipeline stages).
+  - Turn 2 (Topic Switch: Tooling & Methodology Gaps): Switch naturally to a different topic, challenging a missing tool, architecture, or workflow discrepancy vs the JD.
+  - Turn 3 (Topic Switch: STAR Metric Proof): Switch naturally to another topic, demanding proof for a specific percentage/metric claim ("What specifically did YOU do to get that result?").
+  - Turn 4 (Topic Switch: Failure Probe or Culture Fit): Force them to discuss a major failure or how they adapt to startup/corporate culture.
+
+---
+### THE TRANSITION GATE (The Pivot)
+After asking 3 to 4 total questions across Phase 1 (or when candidate completes their defense), execute a clear transition gate:
+- Say EXACTLY: "Take a breath. Are you with me now? Say yes or continue, and we will go over and improve what can be improved."
+- DO NOT output Phase 2 recommendations until the candidate responds with "yes" or "continue".
+
+---
+### PHASE 2: The Rebuild & Mock Interview (The Coach)
+Once the candidate confirms "yes" or "continue", drop the adversarial act and become their expert Career Coach.
+- CRITICAL: Rebuild their application using the EXACT SPOKEN DEFENSE ANSWERS they provided during Phase 1 voice interaction!
+- INTERACTIVE DELIVERABLE RULE: Deliver Phase 2 improvements ONE BY ONE.
+  - Turn 1 of Phase 2: State the 1st STAR resume patch derived directly from their spoken defense. Then ask: "Say continue to hear your second resume improvement."
+  - Turn 2 of Phase 2: State the 2nd STAR resume patch derived from their defense. Then ask: "Say continue for your interview playbook."
+  - Turn 3 of Phase 2: State the interview playbook response. Then ask: "Say report to view your complete battle audit report."
+
+---
+### CRITICAL FORMATTING & TTS RULES
+- ABSOLUTELY NO MARKDOWN CHARACTERS like **, ##, #, *, or bracketed tags like [PHASE 1] in spoken responses. TTS engines pronounce them as "star star" or "pound pound". Write in clean, professional, plain spoken English.
+- Keep EVERY turn under 40 words so voice generation is fast and never drops audio.
+"""
+
 def get_chat_response(history, message, context):
-    """Text chat UI upgraded to S.P.A.R.T.A. Llama 3.3 70B Heavy Reasoning"""
+    """Text chat UI upgraded to S.P.A.R.T.A. Two-Phase Interrogation Engine"""
     
-    # Dynamic System Prompt to handle both Red Pill (Roast) and Blue Pill (Rewrite) optimally.
-    system_prompt = f"""You are S.P.A.R.T.A., an elite AI engineering architect. 
-    If the user asks for a resume rewrite or improvement, provide highly technical, ATS-optimized, metrics-driven bullet points. 
-    If the user is answering an interview question or arguing code logic, act as a ruthless, aggressive CTO and brutally challenge their logic. 
-    Be concise. Do not use pleasantries.
-    CONTEXT:
-    {context}"""
+    system_prompt = f"{SPARTA_TWO_PHASE_PROMPT}\n\nCONTEXT & EVIDENCE:\n{context}"
     
     messages = [{"role": "system", "content": system_prompt}]
     
@@ -224,29 +295,30 @@ def get_chat_response(history, message, context):
         completion = groq_client.chat.completions.create(
             model=HEAVY_MODEL, 
             messages=messages,
-            temperature=0.7
+            temperature=0.6
         )
-        return completion.choices[0].message.content
+        return clean_tts_text(completion.choices[0].message.content)
     except Exception as e:
         return f"System Malfunction... {e}"
 
 def generate_interview_challenge(code_context, analysis_json):
     prompt = f"""
-    Act as a ruthless CTO conducting a high-pressure technical interview. 
-    ANALYSIS: {analysis_json}
-    CODE: {code_context[:10000]}
+    {SPARTA_TWO_PHASE_PROMPT}
     
-    Look at the red flags. If there is phantomware, attack it. If the code is weak, call it out. Give me a 1 sentence, highly aggressive technical question based exactly on their code or claims. No greetings. No pleasantries.
+    ANALYSIS & METRICS: {analysis_json}
+    CODEBASE CONTEXT: {code_context[:15000]}
+    
+    INSTRUCTION: Initiate PHASE 1 (The Hot Seat). Generate EXACTLY ONE sharp, challenging technical question to open the interrogation. Focus on either an Under-the-Hood "Vibe Code" check (asking specifically how their project/code functions under the hood: parsing, algorithms, database, pipeline) OR their biggest tooling/methodology gap vs the JD. DO NOT ask multiple questions. Ask ONLY 1 question.
     """
     try:
         completion = groq_client.chat.completions.create(
             model=HEAVY_MODEL,
             messages=[{"role": "user", "content": prompt}],
-            temperature=0.7
+            temperature=0.6
         )
-        return completion.choices[0].message.content
+        return clean_tts_text(completion.choices[0].message.content)
     except Exception as e:
-        return "Explain the architecture of your most complex project right now, and don't lie."
+        return "Explain the under-the-hood architecture of your project and how your data pipeline handles edge cases."
 
 def generate_ats_resume(resume_text, code_context):
     prompt = f"""
@@ -264,34 +336,36 @@ def generate_ats_resume(resume_text, code_context):
     except Exception as e:
         return f"Error: {e}"
 
-def reconstruct_resume(resume_text: str):
-    system_prompt = """
+def reconstruct_resume(resume_text: str, spoken_transcript: str = ""):
+    system_prompt = f"""
     You are S.P.A.R.T.A., an elite FAANG resume reconstructor.
-    Convert the provided resume text into 3 powerful bullet points.
+    Convert the provided resume text AND candidate's voice interrogation defense transcript into 3 powerful STAR/XYZ bullet points.
+    
+    CANDIDATE SPOKEN DEFENSE TRANSCRIPT:
+    {spoken_transcript[:10000] if spoken_transcript else "No voice transcript recorded."}
     
     ABSOLUTE RULES:
-    1. Use the XYZ Formula: Accomplished [X] as measured by [Y], by doing [Z].
-    2. NEVER invent metrics, percentages, or technologies.
-    3. If a metric is missing, use a bracketed placeholder like 🔴[X]% or 🔴[Metric].
-    4. Start every bullet with a Tier-1 action verb (e.g., Architected, Engineered, Spearheaded).
+    1. Use the candidate's actual voice defense answers to extract hidden technical depth, metrics, and explanations.
+    2. Use the XYZ Formula: Accomplished [X] as measured by [Y], by doing [Z].
+    3. Start every bullet with a Tier-1 action verb (e.g., Architected, Engineered, Spearheaded).
     
     Output strictly in this JSON format:
-    {
+    {{
       "bullets": [
-        {
-          "original": "Short summary of what they said",
-          "enhanced": "The FAANG-grade XYZ bullet with placeholders"
-        }
+        {{
+          "original": "Short summary of claim or spoken defense",
+          "enhanced": "The FAANG-grade XYZ bullet patch built from their voice defense"
+        }}
       ]
-    }
+    }}
     """
     
     try:
         completion = groq_client.chat.completions.create(
-            model=HEAVY_MODEL, # Correct Groq's lightning-fast 70B model
+            model=HEAVY_MODEL,
             messages=[
                 {"role": "system", "content": system_prompt},
-                {"role": "user", "content": resume_text}
+                {"role": "user", "content": f"RESUME TEXT:\n{resume_text}"}
             ],
             temperature=0.3,
             response_format={"type": "json_object"}

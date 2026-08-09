@@ -70,6 +70,7 @@ export interface RoastData {
     trigger_claim: string;
     attack_question: string;
   }>;
+  resume_text?: string;
 }
 
 interface ApiResponse {
@@ -303,7 +304,7 @@ interface SectionCardProps {
 }
 
 function SectionCard({ sectionKey, data, delay, visible }: SectionCardProps) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(sectionKey === "experience" || sectionKey === "skills");
   const [barWidth, setBarWidth] = useState("0%");
 
   useEffect(() => {
@@ -488,7 +489,7 @@ function RoastDashboard({
     <>
       <StickyNav onReset={onReset} />
       <div
-        className="max-w-7xl mx-auto w-full px-6 py-12 opacity-0 animate-[fadeIn_0.7s_ease_forwards]"
+        className="max-w-[1600px] mx-auto w-full px-6 py-10 opacity-0 animate-[fadeIn_0.7s_ease_forwards]"
         style={{ animationFillMode: "forwards" }}
       >
         <style>{`
@@ -497,12 +498,12 @@ function RoastDashboard({
           .ripple-circle { animation: ripple 0.6s ease-out forwards; }
         `}</style>
 
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
           {/* ── Left Column: PDF Panel ── */}
-          <div className="lg:sticky lg:top-24 self-start">
-            <div className="bg-neutral-900/50 border border-neutral-800 rounded-xl min-h-[600px] p-6 flex flex-col">
+          <div className="lg:col-span-6 lg:sticky lg:top-24 self-start">
+            <div className="bg-neutral-900/50 border border-neutral-800 rounded-xl min-h-[820px] p-6 flex flex-col">
               {/* Panel header */}
-              <div className="flex items-center gap-2 mb-6">
+              <div className="flex items-center gap-2 mb-4">
                 <FileText className="w-4 h-4 text-neutral-500" />
                 <span className="text-xs font-mono text-neutral-500 tracking-widest uppercase">
                   Resume PDF
@@ -513,7 +514,7 @@ function RoastDashboard({
                 // Real PDF viewer
                 <iframe
                   src={pdfUrl}
-                  className="w-full h-full rounded-xl min-h-[600px] border border-neutral-800 bg-neutral-900"
+                  className="w-full h-full rounded-xl min-h-[760px] border border-neutral-800 bg-neutral-900 flex-1"
                   title="Resume Preview"
                 />
               ) : (
@@ -541,7 +542,7 @@ function RoastDashboard({
           </div>
 
           {/* ── Right Column: Roast Analysis ── */}
-          <div>
+          <div className="lg:col-span-6">
             {/* Score Header Card */}
             <div className="bg-neutral-900/50 border border-neutral-800 rounded-xl p-6 mb-4">
               <div className="flex flex-col items-center">
@@ -635,7 +636,11 @@ function RoastDashboard({
             >
               <div className="flex flex-col sm:flex-row items-center gap-4 mt-8 w-full">
                 <button 
-                  onClick={() => setAppState("interview")}
+                  onClick={() => {
+                    sessionStorage.setItem("sparta_roast_data", JSON.stringify(roastData));
+                    sessionStorage.setItem("sparta_resume_text", roastData.resume_text || "");
+                    window.location.href = "/interrogation";
+                  }}
                   className="flex-1 px-8 py-4 bg-red-950/20 hover:bg-red-900/40 border border-red-500/30 hover:border-red-500/60 text-red-500 font-bold rounded-xl transition-all flex justify-center items-center gap-2"
                 >
                   <Mic size={18} /> Initiate Voice Interrogation →
@@ -766,7 +771,10 @@ const VoiceModal = ({
       // Safely extract the response directly matching FastAPI's {response: ...} structure
       const replyText = res.data.response || res.data.reply || (typeof res.data === 'string' ? res.data : JSON.stringify(res.data));
 
-      // -- FETCH TTS FROM DEEPGRAM AURA --
+      const words = replyText.toString().split(" ");
+      let audioPlayed = false;
+
+      // -- FETCH TTS FROM DEEPGRAM AURA & SYNC TEXT TO AUDIO --
       try {
         const tokenRes = await fetch("/api/deepgram");
         const tokenData = await tokenRes.json();
@@ -780,46 +788,67 @@ const VoiceModal = ({
             body: JSON.stringify({ text: replyText.toString() })
           });
           const audioBlob = await audioRes.blob();
-          const audioUrl = URL.createObjectURL(audioBlob);
-          if (audioPlayer.current) {
+          if (audioBlob && audioBlob.size > 100 && audioPlayer.current) {
+            const audioUrl = URL.createObjectURL(audioBlob);
+            try {
+              audioPlayer.current.pause();
+            } catch (e) {}
+            
             audioPlayer.current.src = audioUrl;
-            audioPlayer.current.play();
+            
+            // Audio-synced text reveal handler
+            audioPlayer.current.ontimeupdate = () => {
+              if (audioPlayer.current && audioPlayer.current.duration > 0) {
+                const progress = audioPlayer.current.currentTime / audioPlayer.current.duration;
+                const wordIndex = Math.min(words.length, Math.floor(progress * words.length) + 1);
+                setTranscript(words.slice(0, wordIndex).join(" "));
+              }
+            };
+            
+            audioPlayer.current.onended = () => {
+              setTranscript(replyText.toString());
+              setIsAiSpeaking(false);
+              setChatHistory((prev) => [
+                ...prev, 
+                { type: "user", text: userMessage }, 
+                { type: "model", text: replyText.toString() }
+              ]);
+            };
+            
+            try {
+              await audioPlayer.current.play();
+              audioPlayed = true;
+            } catch (playErr: any) {
+              if (playErr.name !== "AbortError") {
+                console.warn("Audio playback interrupted:", playErr);
+              }
+            }
           }
         }
       } catch (err) {
         console.error("TTS Error:", err);
       }
       
-      const words = replyText.toString().split(" ");
-      let currentText = "";
-      let i = 0;
-
-      const interval = setInterval(() => {
-        if (i < words.length) {
-          currentText += (i > 0 ? " " : "") + words[i];
-          setTranscript(currentText);
-          
-          // PRETEXT: Calculate exact height off-DOM
-          try {
-            const prepared = prepare(currentText, "16px sans-serif", { whiteSpace: "pre-wrap" });
-            // Assuming a fixed container width of ~600px for the text area
-            const { height } = layout(prepared, 600, 24); 
-            setContainerHeight(height);
-          } catch (e) {
-            console.warn("Pretext layout calculation skipped during dev", e);
+      // Fallback typewriter interval if audio isn't supported or fails
+      if (!audioPlayed) {
+        let currentText = "";
+        let i = 0;
+        const interval = setInterval(() => {
+          if (i < words.length) {
+            currentText += (i > 0 ? " " : "") + words[i];
+            setTranscript(currentText);
+            i++;
+          } else {
+            clearInterval(interval);
+            setIsAiSpeaking(false);
+            setChatHistory((prev) => [
+              ...prev, 
+              { type: "user", text: userMessage }, 
+              { type: "model", text: replyText.toString() }
+            ]);
           }
-          
-          i++;
-        } else {
-          clearInterval(interval);
-          setIsAiSpeaking(false);
-          setChatHistory((prev) => [
-            ...prev, 
-            { type: "user", text: userMessage }, 
-            { type: "model", text: replyText.toString() }
-          ]);
-        }
-      }, 150); // Streams a word every 150ms
+        }, 150);
+      }
       
     } catch (e) {
       console.error(e);
@@ -848,7 +877,7 @@ const VoiceModal = ({
       exit={{ opacity: 0, y: 20 }}
       className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6 bg-black/80 backdrop-blur-md"
     >
-      <div className="w-full max-w-4xl bg-black border border-neutral-800 rounded-2xl shadow-2xl flex flex-col overflow-hidden h-[80vh]">
+      <div className="w-full max-w-6xl bg-black border border-neutral-800 rounded-2xl shadow-2xl flex flex-col overflow-hidden h-[90vh]">
         
         {/* Header */}
         <div className="flex items-center justify-between p-6 border-b border-neutral-900 bg-neutral-950">
@@ -1112,10 +1141,23 @@ export default function HomePage() {
         headers: { "Content-Type": "multipart/form-data" },
       });
       console.log("✅ S.P.A.R.T.A. Raw Response:", response.data);
+
+      if (response.data.status === "error" || (response.data as any).detail) {
+        const errorDetail = (response.data as any).detail || (response.data as any).message || "Document rejected. Please upload a valid resume PDF.";
+        setErrorMessage(errorDetail);
+        setAppState("error");
+        return;
+      }
       
       const parsedData = typeof response.data.data === "string" 
         ? JSON.parse(response.data.data) 
         : response.data.data;
+
+      if (!parsedData || !parsedData.sections) {
+        setErrorMessage("This document does not appear to be a valid resume. Please upload a valid resume PDF.");
+        setAppState("error");
+        return;
+      }
         
       LOCAL_CACHE.set(fileCacheKey, parsedData as RoastData);
       setRoastData(parsedData as RoastData);
@@ -1484,22 +1526,30 @@ export default function HomePage() {
 
               <AnimatePresence>
                 {appState === "error" && errorMessage && (
-                  <motion.div
-                    initial={{ opacity: 0, y: 8 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: 8 }}
-                    className="mt-5 flex flex-col items-center gap-3"
-                  >
-                    <p className="text-sm text-red-400 font-mono text-center">
-                      ✗ {errorMessage}
-                    </p>
-                    <button
-                      onClick={handleReset}
-                      className="text-xs text-neutral-500 hover:text-white underline underline-offset-4 transition-colors duration-150"
+                  <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
+                    <motion.div
+                      initial={{ opacity: 0, scale: 0.95 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      exit={{ opacity: 0, scale: 0.95 }}
+                      className="bg-neutral-950 border border-red-900/60 rounded-2xl p-8 max-w-md w-full shadow-2xl flex flex-col items-center gap-5 text-center"
                     >
-                      Try again
-                    </button>
-                  </motion.div>
+                      <div className="w-12 h-12 rounded-full bg-red-950/60 border border-red-800/60 text-red-500 flex items-center justify-center">
+                        <AlertTriangle size={24} />
+                      </div>
+                      <div className="space-y-2">
+                        <h3 className="text-lg font-bold text-white tracking-wide">Document Rejected</h3>
+                        <p className="text-sm text-red-300/90 leading-relaxed font-medium">
+                          {errorMessage}
+                        </p>
+                      </div>
+                      <button
+                        onClick={handleReset}
+                        className="mt-2 w-full py-3.5 bg-red-600 hover:bg-red-700 text-white font-bold rounded-xl transition-all text-xs font-mono uppercase tracking-wider shadow-lg cursor-pointer"
+                      >
+                        ← Got It / Upload Another Resume
+                      </button>
+                    </motion.div>
+                  </div>
                 )}
               </AnimatePresence>
             </motion.div>

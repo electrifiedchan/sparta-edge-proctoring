@@ -13,8 +13,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "S.P.A.R.T.A.",
-  description: "Adversarial Resume Verification & Technical Combat Engine",
+  title: "S.P.A.R.T.A. — Smart Platform for Adversarial Readiness & Technical Assessment",
+  description: "Smart Platform for Adversarial Readiness & Technical Assessment. FAANG-grade resume verification, code auditing, and live voice interrogation.",
 };
 
 export default function RootLayout({

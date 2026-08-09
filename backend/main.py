@@ -475,7 +475,10 @@ async def analyze_portfolio(
         return {"status": "error", "message": str(e)}
     finally:
         if os.path.exists(temp_filename):
-            os.remove(temp_filename)
+            try:
+                os.remove(temp_filename)
+            except Exception as remove_err:
+                logger.warning(f"⚠️ Non-critical: Could not delete temp file {temp_filename}: {remove_err}")
 
 @app.post("/add_repo")
 async def add_repo_context(request: RepoRequest):
@@ -546,10 +549,11 @@ from brain import reconstruct_resume
 
 class RebuildRequest(BaseModel):
     resume_text: str
+    spoken_transcript: str = ""
 
 @app.post("/rebuild")
 async def rebuild_endpoint(req: RebuildRequest):
-    result = reconstruct_resume(req.resume_text)
+    result = reconstruct_resume(req.resume_text, req.spoken_transcript)
     return result
 
 # We conditionally import parse_resume to satisfy the user's instructions without crashing uvicorn if it doesn't exist

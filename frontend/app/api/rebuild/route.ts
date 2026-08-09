@@ -2,13 +2,16 @@ import { NextResponse } from "next/server";
 
 export async function POST(req: Request) {
   try {
-    const { resumeText } = await req.json();
+    const { resumeText, spokenTranscript } = await req.json();
 
     const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
     const response = await fetch(`${backendUrl}/rebuild`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ resume_text: resumeText }),
+      body: JSON.stringify({
+        resume_text: resumeText,
+        spoken_transcript: spokenTranscript || ""
+      }),
     });
 
     // Explicitly check if the Python server failed

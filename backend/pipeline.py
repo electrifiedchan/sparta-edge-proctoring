@@ -28,25 +28,25 @@ def extract_text_intelligently(pdf_path: str, nvidia_key: str, page_number: int 
     if not os.path.exists(pdf_path):
         raise FileNotFoundError(f"Missing file: {pdf_path}")
         
-    doc = fitz.open(pdf_path)
-    page = doc.load_page(page_number)
-    
-    # Attempt 1: The Fast Lane (Native Digital Text)
-    native_text = page.get_text("text").strip()
-    
-    if len(native_text) > 50:
-        print("⚡ Bridge: Digital text detected! Skipping OCR for 100% accuracy.")
-        return native_text
+    with fitz.open(pdf_path) as doc:
+        page = doc.load_page(page_number)
         
-    # Attempt 2: The OCR Fallback (High-Res PNG + Dedicated Infer Endpoint)
-    print("⚠️ Bridge: No digital text found. Triggering High-Res PNG conversion...")
-    
-    # THE FIX: 3.0x zoom + Lossless PNG (No more F -> P hallucinations)
-    zoom = 3.0    
-    mat = fitz.Matrix(zoom, zoom)
-    pix = page.get_pixmap(matrix=mat)
-    img_bytes = pix.tobytes("png")
-    encoded = base64.b64encode(img_bytes).decode('utf-8')
+        # Attempt 1: The Fast Lane (Native Digital Text)
+        native_text = page.get_text("text").strip()
+        
+        if len(native_text) > 50:
+            print("⚡ Bridge: Digital text detected! Skipping OCR for 100% accuracy.")
+            return native_text
+            
+        # Attempt 2: The OCR Fallback (High-Res PNG + Dedicated Infer Endpoint)
+        print("⚠️ Bridge: No digital text found. Triggering High-Res PNG conversion...")
+        
+        # THE FIX: 3.0x zoom + Lossless PNG (No more F -> P hallucinations)
+        zoom = 3.0    
+        mat = fitz.Matrix(zoom, zoom)
+        pix = page.get_pixmap(matrix=mat)
+        img_bytes = pix.tobytes("png")
+        encoded = base64.b64encode(img_bytes).decode('utf-8')
     
     print(f"   -> Base64 Length: {len(encoded)} characters (Bypassing 180k limit!)")
     
