@@ -550,10 +550,11 @@ from brain import reconstruct_resume
 class RebuildRequest(BaseModel):
     resume_text: str
     spoken_transcript: str = ""
+    context: str = ""
 
 @app.post("/rebuild")
 async def rebuild_endpoint(req: RebuildRequest):
-    result = reconstruct_resume(req.resume_text, req.spoken_transcript)
+    result = reconstruct_resume(req.resume_text, req.spoken_transcript, req.context)
     return result
 
 # We conditionally import parse_resume to satisfy the user's instructions without crashing uvicorn if it doesn't exist

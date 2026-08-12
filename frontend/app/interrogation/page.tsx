@@ -39,6 +39,7 @@ export default function InterrogationPage() {
 
   // Report state
   const [rebuildBullets, setRebuildBullets] = useState<{ original: string; enhanced: string }[]>([]);
+  const [defenseReport, setDefenseReport] = useState<any>(null);
   const [isGeneratingReport, setIsGeneratingReport] = useState(false);
   const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
 
@@ -319,10 +320,12 @@ export default function InterrogationPage() {
         body: JSON.stringify({
           resumeText: rawResumeText || "Worked on backend APIs and system infrastructure.",
           spokenTranscript: fullVoiceTranscript || userTranscript || "",
+          context: JSON.stringify(roastData || {}),
         }),
       });
       const data = await res.json();
       setRebuildBullets(data.bullets || []);
+      setDefenseReport(data);
     } catch (e) {
       console.error("Error generating report bullets:", e);
     }
@@ -457,7 +460,7 @@ export default function InterrogationPage() {
                         ) : (
                           <div className="flex items-center gap-2 py-1 text-neutral-600 font-mono">
                             <span className="inline-block w-2 h-2 rounded-full bg-neutral-800 animate-pulse" />
-                            <span>{isCurrent ? "Formulating challenge..." : "Awaiting turn..."}</span>
+                            <span>{isCurrent ? "Processing turn..." : "Awaiting turn..."}</span>
                           </div>
                         )}
                       </div>
@@ -512,9 +515,6 @@ export default function InterrogationPage() {
                     ) : (
                       <div className="flex items-center gap-3">
                         <span className="w-3 h-6 bg-red-500 animate-pulse rounded-none inline-block align-middle shadow-[0_0_10px_rgba(239,68,68,0.7)]" />
-                        <span className="text-sm font-mono text-neutral-500 uppercase tracking-widest">
-                          Formulating challenge...
-                        </span>
                       </div>
                     )}
                   </div>
@@ -549,27 +549,114 @@ export default function InterrogationPage() {
           <div className="space-y-8 animate-[fadeIn_0.5s_ease_forwards]">
             {/* Header Score Card */}
             <div className="bg-neutral-900/60 border border-neutral-800 rounded-2xl p-8 flex flex-col md:flex-row items-center justify-between gap-6">
-              <div className="space-y-2">
-                <div className="flex items-center gap-2">
-                  <Award className="text-yellow-500" size={24} />
+              <div className="space-y-3">
+                <div className="flex items-center gap-3">
+                  <Award className="text-yellow-500" size={26} />
                   <h2 className="text-2xl font-black text-white">S.P.A.R.T.A. Battle Audit Report</h2>
                 </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="px-3 py-1 bg-red-950/40 border border-red-900/60 text-red-400 font-mono text-xs rounded-md uppercase tracking-wider font-semibold">
+                    {defenseReport?.mode_evaluated || "VERBAL DEFENSE AUDIT"}
+                  </span>
+                  {defenseReport?.defense_verdict && (
+                    <span className="px-3 py-1 bg-neutral-800 text-white font-mono text-xs rounded-md font-semibold">
+                      VERDICT: {defenseReport.defense_verdict}
+                    </span>
+                  )}
+                </div>
                 <p className="text-sm text-neutral-400">
-                  Post-interrogation evaluation score & copy-pasteable STAR resume patches.
+                  Dual-grounded voice defense evaluation score & 4-turn breakdown derived from your spoken answers.
                 </p>
               </div>
 
               <div className="flex items-center gap-6">
-                <div className="text-center">
+                <div className="text-center bg-black/60 border border-neutral-800 rounded-xl px-6 py-4">
                   <p className="text-xs font-mono text-neutral-500 uppercase tracking-widest mb-1">
-                    Verified Score
+                    Verbal Defense Score
                   </p>
-                  <span className="text-4xl font-black text-white">
-                    {roastData?.combat_readiness_score || 85}/100
+                  <span className="text-4xl font-black text-red-500">
+                    {defenseReport?.overall_defense_score || roastData?.combat_readiness_score || 85}/100
                   </span>
                 </div>
               </div>
             </div>
+
+            {/* 4-Turn Topic Defense Scorecard */}
+            {defenseReport?.turn_scores && (
+              <div className="bg-neutral-950 border border-neutral-900 rounded-2xl p-8 space-y-6">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-xl font-bold text-white flex items-center gap-2">
+                    <ShieldCheck className="text-red-500" size={22} />
+                    4-Turn Interrogation Defense Scorecard
+                  </h3>
+                  <span className="text-xs font-mono text-neutral-500 uppercase">
+                    Turn-by-Turn Audit
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {Object.entries(defenseReport.turn_scores).map(([turnKey, turnData]: [string, any], idx) => (
+                    <div
+                      key={turnKey}
+                      className="bg-neutral-900/60 border border-neutral-800 rounded-xl p-5 space-y-3"
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-mono font-bold text-red-400 uppercase">
+                          Turn {idx + 1}: {turnData.label}
+                        </span>
+                        <span className="px-2.5 py-1 bg-red-950/60 border border-red-900/60 text-red-300 font-mono text-xs rounded font-bold">
+                          {turnData.score}%
+                        </span>
+                      </div>
+
+                      <div className="w-full bg-neutral-900 rounded-full h-2 overflow-hidden border border-neutral-800">
+                        <div
+                          className="bg-gradient-to-r from-red-600 to-red-400 h-full transition-all duration-500"
+                          style={{ width: `${turnData.score}%` }}
+                        />
+                      </div>
+
+                      <p className="text-xs text-neutral-300 leading-relaxed font-medium">
+                        "{turnData.feedback}"
+                      </p>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Key Strengths & Vulnerabilities */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
+                  {defenseReport.key_strengths && defenseReport.key_strengths.length > 0 && (
+                    <div className="bg-emerald-950/20 border border-emerald-900/30 rounded-xl p-4 space-y-2">
+                      <p className="text-xs font-mono font-bold text-emerald-400 uppercase tracking-wider">
+                        Key Verbal Strengths:
+                      </p>
+                      <ul className="space-y-1">
+                        {defenseReport.key_strengths.map((str: string, sIdx: number) => (
+                          <li key={sIdx} className="text-xs text-emerald-300 flex items-start gap-2">
+                            <span>•</span> {str}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+
+                  {defenseReport.vulnerabilities_exposed && defenseReport.vulnerabilities_exposed.length > 0 && (
+                    <div className="bg-red-950/20 border border-red-900/30 rounded-xl p-4 space-y-2">
+                      <p className="text-xs font-mono font-bold text-red-400 uppercase tracking-wider">
+                        Vulnerabilities Exposed:
+                      </p>
+                      <ul className="space-y-1">
+                        {defenseReport.vulnerabilities_exposed.map((vul: string, vIdx: number) => (
+                          <li key={vIdx} className="text-xs text-red-300 flex items-start gap-2">
+                            <span>•</span> {vul}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
 
             {/* Resume Patch Section */}
             <div className="bg-neutral-950 border border-neutral-900 rounded-2xl p-8 space-y-6">

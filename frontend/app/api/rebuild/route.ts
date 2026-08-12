@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 
 export async function POST(req: Request) {
   try {
-    const { resumeText, spokenTranscript } = await req.json();
+    const { resumeText, spokenTranscript, context } = await req.json();
 
     const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
     const response = await fetch(`${backendUrl}/rebuild`, {
@@ -10,7 +10,8 @@ export async function POST(req: Request) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         resume_text: resumeText,
-        spoken_transcript: spokenTranscript || ""
+        spoken_transcript: spokenTranscript || "",
+        context: context || ""
       }),
     });
 
