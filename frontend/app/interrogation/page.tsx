@@ -19,8 +19,10 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import axios from "axios";
+import { useRouter } from "next/navigation";
 
 export default function InterrogationPage() {
+  const router = useRouter();
   const [hasStarted, setHasStarted] = useState(false);
   const [isListening, setIsListening] = useState(false);
   const [transcript, setTranscript] = useState("Click 'Initiate Interrogation Protocol' to begin...");
@@ -29,7 +31,7 @@ export default function InterrogationPage() {
   const [isAiSpeaking, setIsAiSpeaking] = useState(false);
   
   // Turn Management State
-  const [currentTurn, setCurrentTurn] = useState(1);
+  const [currentTurn, setCurrentTurn] = useState(0);
   const [turnQuestions, setTurnQuestions] = useState<{ [key: number]: string }>({});
   const [showReport, setShowReport] = useState(false);
 
@@ -54,6 +56,13 @@ export default function InterrogationPage() {
     try {
       const storedData = sessionStorage.getItem("sparta_roast_data");
       const storedResume = sessionStorage.getItem("sparta_resume_text");
+      
+      if (!storedData || !storedResume) {
+        console.warn("No resume data found, redirecting to home...");
+        router.push("/");
+        return;
+      }
+
       if (storedData) {
         setRoastData(JSON.parse(storedData));
       }
@@ -62,13 +71,25 @@ export default function InterrogationPage() {
       }
     } catch (e) {
       console.error("Error reading session storage:", e);
+      router.push("/");
     }
-  }, []);
+  }, [router]);
 
-  const attackContext = roastData?.faang_attack_vectors?.[0] || {
-    trigger_claim: "Senior Technical Architecture",
-    attack_question: "Explain the under-the-hood implementation mechanics of your primary system.",
-  };
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.code === "Space" && hasStarted && !showReport) {
+        e.preventDefault();
+        if (isListening) {
+          stopMicrophone();
+        } else {
+          startMicrophone();
+        }
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [hasStarted, showReport, isListening, currentTurn, userTranscript]);
 
   const handleStartInterrogation = () => {
     setHasStarted(true);
@@ -77,8 +98,8 @@ export default function InterrogationPage() {
       audioPlayer.current.play().catch(() => {});
     }
 
-    const initPrompt = `Start the interrogation using this context: the user claimed "${attackContext.trigger_claim}". Ask the first under-the-hood technical question.`;
-    triggerAiResponse(initPrompt, 1);
+    const initPrompt = `Start the interrogation at TURN 0 (INTRO). Ask the candidate to introduce themselves.`;
+    triggerAiResponse(initPrompt, 0);
   };
 
   const startMicrophone = async () => {
@@ -183,6 +204,13 @@ export default function InterrogationPage() {
       // Store the actual question asked for this turn
       setTurnQuestions((prev) => ({ ...prev, [targetTurn]: cleanText }));
 
+      // Update chat history immediately so interruptions don't cause history loss
+      setChatHistory((prev) => [
+        ...prev,
+        { type: "user", text: userMessage },
+        { type: "model", text: cleanText },
+      ]);
+
       const words = cleanText.split(" ");
       let audioPlayed = false;
 
@@ -233,11 +261,11 @@ export default function InterrogationPage() {
               if (!isInterrogationEndedRef.current) {
                 setTranscript(cleanText);
                 setIsAiSpeaking(false);
-                setChatHistory((prev) => [
-                  ...prev,
-                  { type: "user", text: userMessage },
-                  { type: "model", text: cleanText },
-                ]);
+
+                // Auto-redirect to Results if Conclusion (Turn 8) finishes speaking
+                if (targetTurn >= 8) {
+                  handleFinishInterrogation();
+                }
               }
             };
 
@@ -407,17 +435,6 @@ export default function InterrogationPage() {
           <div className="flex-1 flex flex-col lg:flex-row gap-6 min-h-[750px] bg-black border border-neutral-800 rounded-2xl shadow-2xl overflow-hidden">
             {/* Left Column: Context & Structured Topic Progression Panel */}
             <div className="lg:w-1/3 border-b lg:border-b-0 lg:border-r border-neutral-900 p-6 bg-neutral-950/50 flex flex-col gap-6">
-              <div>
-                <h3 className="text-xs font-semibold text-neutral-500 uppercase tracking-widest mb-3">
-                  Current Target Vector
-                </h3>
-                <div className="bg-neutral-900 border border-neutral-800 rounded-xl p-4 space-y-2">
-                  <p className="text-xs text-neutral-500 font-mono">Trigger Claim:</p>
-                  <p className="text-sm text-neutral-200 font-semibold">
-                    "{attackContext?.trigger_claim || "Software Architecture"}"
-                  </p>
-                </div>
-              </div>
 
               {/* Structured Topic Progression Panel */}
               <div className="bg-neutral-900/80 border border-neutral-800 rounded-xl p-5 space-y-4">
@@ -425,8 +442,18 @@ export default function InterrogationPage() {
                   Topic Progression
                 </h4>
 
-                <div className="space-y-3 text-xs">
-                  {[1, 2, 3, 4].map((turnNum) => {
+                <div className="space-y-3 text-xs max-h-[450px] overflow-y-auto pr-2 custom-scrollbar">
+                  {[
+                    { t: 0, label: "Intro: Candidate Introduction" },
+                    { t: 1, label: "Phase 1: Project 1 Concept" },
+                    { t: 2, label: "Phase 1: Project 2 Trade-off" },
+                    { t: 3, label: "Phase 1: Accomplish & Failure" },
+                    { t: 4, label: "Pivot: Transition Gate" },
+                    { t: 5, label: "Phase 2: Missing Tech Stack" },
+                    { t: 6, label: "Phase 2: Deployment Stack" },
+                    { t: 7, label: "Phase 2: Career/Arch Pivot" },
+                  ].map((turnObj) => {
+                    const turnNum = turnObj.t;
                     const questionText = turnQuestions[turnNum];
                     const isCurrent = currentTurn === turnNum;
                     const isCompleted = turnNum < currentTurn || !!questionText;
@@ -444,7 +471,7 @@ export default function InterrogationPage() {
                       >
                         <div className="flex items-center justify-between mb-1">
                           <span className={`font-mono font-bold ${isCurrent ? "text-red-400" : "text-neutral-500"}`}>
-                            Turn {turnNum}:
+                            {turnObj.label}
                           </span>
                           {isCurrent && isAiSpeaking && (
                             <span className="flex items-center gap-1 text-[10px] text-red-400 font-mono animate-pulse">
@@ -460,7 +487,7 @@ export default function InterrogationPage() {
                         ) : (
                           <div className="flex items-center gap-2 py-1 text-neutral-600 font-mono">
                             <span className="inline-block w-2 h-2 rounded-full bg-neutral-800 animate-pulse" />
-                            <span>{isCurrent ? "Processing turn..." : "Awaiting turn..."}</span>
+                            <span>{isCurrent ? "Processing..." : "Awaiting..."}</span>
                           </div>
                         )}
                       </div>
@@ -532,7 +559,7 @@ export default function InterrogationPage() {
                   }`}
                 >
                   {isListening ? <MicOff size={18} /> : <Mic size={18} />}
-                  {isListening ? "Stop Speaking & Send" : "Tap to Speak"}
+                  {isListening ? "Stop Speaking & Send (Space)" : "Tap to Speak (Space)"}
                 </button>
 
                 <button
@@ -581,91 +608,67 @@ export default function InterrogationPage() {
               </div>
             </div>
 
-            {/* 4-Turn Topic Defense Scorecard */}
-            {defenseReport?.turn_scores && (
+            {/* Phase 1: Mistakes & Failsafes */}
+            {defenseReport?.phase1_mistakes && (
               <div className="bg-neutral-950 border border-neutral-900 rounded-2xl p-8 space-y-6">
                 <div className="flex items-center justify-between">
                   <h3 className="text-xl font-bold text-white flex items-center gap-2">
-                    <ShieldCheck className="text-red-500" size={22} />
-                    4-Turn Interrogation Defense Scorecard
+                    <Activity className="text-red-500" size={22} />
+                    Phase 1: Mistakes & Scrutiny
                   </h3>
-                  <span className="text-xs font-mono text-neutral-500 uppercase">
-                    Turn-by-Turn Audit
-                  </span>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {Object.entries(defenseReport.turn_scores).map(([turnKey, turnData]: [string, any], idx) => (
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  {defenseReport.phase1_mistakes.map((mistake: any, idx: number) => (
                     <div
-                      key={turnKey}
-                      className="bg-neutral-900/60 border border-neutral-800 rounded-xl p-5 space-y-3"
+                      key={idx}
+                      className="bg-neutral-900/60 border border-neutral-800 rounded-xl p-5 flex flex-col gap-3 relative overflow-hidden"
                     >
+                      {mistake.is_unanswered && (
+                         <div className="absolute top-0 left-0 w-full h-1 bg-yellow-500" />
+                      )}
+                      
                       <div className="flex items-center justify-between">
-                        <span className="text-xs font-mono font-bold text-red-400 uppercase">
-                          Turn {idx + 1}: {turnData.label}
+                        <span className="text-xs font-mono font-bold text-neutral-400">
+                          {mistake.question_label}
                         </span>
-                        <span className="px-2.5 py-1 bg-red-950/60 border border-red-900/60 text-red-300 font-mono text-xs rounded font-bold">
-                          {turnData.score}%
+                        <span className={`px-2.5 py-1 font-mono text-xs rounded font-bold ${
+                          mistake.score >= 80 ? 'bg-green-950/60 text-green-400 border border-green-900/60' : 
+                          mistake.score >= 50 ? 'bg-yellow-950/60 text-yellow-400 border border-yellow-900/60' : 
+                          'bg-red-950/60 text-red-400 border border-red-900/60'
+                        }`}>
+                          {mistake.score}/100
                         </span>
                       </div>
 
-                      <div className="w-full bg-neutral-900 rounded-full h-2 overflow-hidden border border-neutral-800">
-                        <div
-                          className="bg-gradient-to-r from-red-600 to-red-400 h-full transition-all duration-500"
-                          style={{ width: `${turnData.score}%` }}
-                        />
-                      </div>
-
-                      <p className="text-xs text-neutral-300 leading-relaxed font-medium">
-                        "{turnData.feedback}"
+                      <p className="text-sm text-neutral-300 leading-relaxed font-medium">
+                        "{mistake.feedback}"
                       </p>
+
+                      {mistake.is_unanswered && mistake.failsafe_recommendation && (
+                        <div className="mt-auto pt-3 border-t border-neutral-800">
+                          <p className="text-xs font-mono text-yellow-500 mb-1 flex items-center gap-1">
+                            ⚠️ Failsafe Recommendation
+                          </p>
+                          <p className="text-xs text-yellow-200/70">
+                            {mistake.failsafe_recommendation}
+                          </p>
+                        </div>
+                      )}
                     </div>
                   ))}
-                </div>
-
-                {/* Key Strengths & Vulnerabilities */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
-                  {defenseReport.key_strengths && defenseReport.key_strengths.length > 0 && (
-                    <div className="bg-emerald-950/20 border border-emerald-900/30 rounded-xl p-4 space-y-2">
-                      <p className="text-xs font-mono font-bold text-emerald-400 uppercase tracking-wider">
-                        Key Verbal Strengths:
-                      </p>
-                      <ul className="space-y-1">
-                        {defenseReport.key_strengths.map((str: string, sIdx: number) => (
-                          <li key={sIdx} className="text-xs text-emerald-300 flex items-start gap-2">
-                            <span>•</span> {str}
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                  )}
-
-                  {defenseReport.vulnerabilities_exposed && defenseReport.vulnerabilities_exposed.length > 0 && (
-                    <div className="bg-red-950/20 border border-red-900/30 rounded-xl p-4 space-y-2">
-                      <p className="text-xs font-mono font-bold text-red-400 uppercase tracking-wider">
-                        Vulnerabilities Exposed:
-                      </p>
-                      <ul className="space-y-1">
-                        {defenseReport.vulnerabilities_exposed.map((vul: string, vIdx: number) => (
-                          <li key={vIdx} className="text-xs text-red-300 flex items-start gap-2">
-                            <span>•</span> {vul}
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                  )}
                 </div>
               </div>
             )}
 
-            {/* Resume Patch Section */}
+            {/* Phase 2: Corrections / Additions */}
             <div className="bg-neutral-950 border border-neutral-900 rounded-2xl p-8 space-y-6">
               <div className="flex items-center gap-3">
                 <Wrench className="text-white" size={22} />
-                <h3 className="text-xl font-bold text-white">The Resume Patch (STAR Bullets)</h3>
+                <h3 className="text-xl font-bold text-white">Phase 2: Corrections & Resume Additions</h3>
               </div>
               <p className="text-sm text-neutral-400">
-                Optimized XYZ/STAR bullets incorporating your exact spoken defense during the voice interrogation:
+                Actionable bullet points derived from your mock interview defense to fix gaps in your resume:
               </p>
 
               {isGeneratingReport ? (
@@ -674,25 +677,22 @@ export default function InterrogationPage() {
                 </div>
               ) : (
                 <div className="space-y-4">
-                  {rebuildBullets.map((diff, idx) => (
+                  {defenseReport?.phase2_corrections?.map((correction: any, idx: number) => (
                     <div
                       key={idx}
                       className="bg-neutral-900/80 border border-neutral-800 rounded-xl p-5 space-y-3"
                     >
-                      <p className="text-xs font-mono text-neutral-500">Spoken Defense Claim:</p>
-                      <p className="text-sm text-neutral-400 italic">"{diff.original}"</p>
-                      <div className="h-px bg-neutral-800" />
                       <div className="flex items-start justify-between gap-4">
                         <div>
-                          <p className="text-xs font-mono text-green-400 mb-1 flex items-center gap-1">
-                            <ShieldCheck size={14} /> FAANG-Grade STAR Patch:
+                          <p className="text-xs font-mono text-green-400 mb-1 flex items-center gap-2">
+                            <ShieldCheck size={14} /> Category: {correction.category || "Addition"}
                           </p>
                           <p className="text-sm text-white font-medium leading-relaxed">
-                            {diff.enhanced}
+                            {correction.bullet}
                           </p>
                         </div>
                         <button
-                          onClick={() => copyToClipboard(diff.enhanced, idx)}
+                          onClick={() => copyToClipboard(correction.bullet, idx)}
                           className="px-3 py-1.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 text-xs font-mono rounded-lg transition-colors flex items-center gap-1.5 flex-shrink-0 cursor-pointer"
                         >
                           {copiedIndex === idx ? <Check size={14} className="text-green-400" /> : <Copy size={14} />}

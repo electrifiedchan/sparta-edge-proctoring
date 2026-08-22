@@ -20,9 +20,9 @@ except Exception as e:
     logger.error(f"❌ Failed to initialize Groq client: {e}")
     groq_client = None
 
-# 🚀 UPGRADED MODEL ROUTING
-HEAVY_MODEL = "llama-3.3-70b-versatile"  # Flagship Llama 3.3 for deep reasoning/adversarial roasts
-FAST_MODEL = "llama-3.1-8b-instant"      # Ultra-fast 8B for JSON extraction and gatekeeping
+# 🧠 UPGRADED MODEL ROUTING
+HEAVY_MODEL = "openai/gpt-oss-120b"  # Flagship GPT OSS 120B for deep reasoning/adversarial roasts
+FAST_MODEL = "openai/gpt-oss-20b"      # Ultra-fast 20B for JSON extraction and gatekeeping
 
 def validate_is_resume(text_content):
     """
@@ -145,11 +145,7 @@ def analyze_resume_vs_code(resume_text, code_context, project_name=None, job_des
             "skills": {{"score": (0-100), "roast": "(Critique of listed tech stack vs actual code usage and JD)"}},
             "formatting": {{"score": (0-100), "roast": "(Critique of resume layout/clarity)"}},
             "ats_compatibility": {{"score": (0-100), "roast": "(Will an ATS robot read this easily?)"}}
-        }},
-        "faang_attack_vectors": [
-            {{"trigger_claim": "(e.g., 'Used React')", "attack_question": "(e.g., 'Explain the fiber reconciliation algorithm')"}},
-            {{"trigger_claim": "(e.g., 'Led a team')", "attack_question": "(Amazon Leadership Principle attack)"}}
-        ]
+        }}
     }}
     """
     try:
@@ -157,7 +153,7 @@ def analyze_resume_vs_code(resume_text, code_context, project_name=None, job_des
             model=HEAVY_MODEL,
             messages=[{"role": "user", "content": prompt}],
             response_format={"type": "json_object"},
-            temperature=0.3
+            temperature=0.1
         )
         raw_content = completion.choices[0].message.content
         try:
@@ -211,8 +207,7 @@ def analyze_resume_vs_code(resume_text, code_context, project_name=None, job_des
                 "skills": {"score": 0, "roast": "Error analyzing skills."},
                 "formatting": {"score": 0, "roast": "Error analyzing formatting."},
                 "ats_compatibility": {"score": 0, "roast": "Error analyzing compatibility."}
-            }, 
-            "faang_attack_vectors": []
+            }
         })
 
 def generate_star_bullets(code_context):
@@ -241,46 +236,33 @@ def clean_tts_text(text: str) -> str:
     text = re.sub(r'`{1,3}[^`]*`{1,3}', '', text)
     return text.strip()
 
-SPARTA_TWO_PHASE_PROMPT = """You are an elite, high-stakes Technical Recruiter and Career Strategist. You operate in two distinct phases when presented with a user's Resume, GitHub Code Evidence, and target Job Description (JD). Your goal is to ensure the candidate is battle-tested.
+SPARTA_6_QUESTION_SCRIPT_PROMPT = """You are S.P.A.R.T.A., an elite Technical Interrogator. You operate in a strict 2-Phase, 6-Question sequence. 
+You are evaluating a candidate based on their Resume and (if provided) their GitHub repository code. 
+If GitHub Code Gist is provided, base Phase 1 questions strongly on their actual code implementation. If not, fallback to their resume claims.
 
----
-### PHASE 1: The Scrutiny (The Hot Seat)
-Adopt the persona of a skeptical, analytical hiring manager / CTO. Stress-test their application and expose weaknesses. Be direct and sharp about professional gaps and technical depth.
+CRITICAL RULES:
+1. ONLY ASK ONE QUESTION AT A TIME. DO NOT advance to the next turn until the user answers.
+2. NO MARKDOWN CHARACTERS (**, ##, *, []). Use plain spoken English for Text-to-Speech compatibility.
+3. Keep your spoken lines very short and direct.
 
-PHASE 1 QUESTIONING PROTOCOL (3-4 TOTAL QUESTIONS, ASKED ONE BY ONE WITH TOPIC ROTATION):
-- You will ask 3 to 4 challenging questions IN TOTAL across Phase 1.
-- CRITICAL SINGLE-QUESTION RULE: In each turn, ask EXACTLY ONE focused question ending with a single question mark (?). Keep your turn short (under 35 words) so spoken voice text is crisp.
-- TOPIC ROTATION ACROSS TURNS:
-  - Turn 1 (Topic: Under-the-Hood Vibe Code): Ask specifically how their software project works under the hood (text extraction, parsing, algorithms, database, pipeline stages).
-  - Turn 2 (Topic Switch: Tooling & Methodology Gaps): Switch naturally to a different topic, challenging a missing tool, architecture, or workflow discrepancy vs the JD.
-  - Turn 3 (Topic Switch: STAR Metric Proof): Switch naturally to another topic, demanding proof for a specific percentage/metric claim ("What specifically did YOU do to get that result?").
-  - Turn 4 (Topic Switch: Failure Probe or Culture Fit): Force them to discuss a major failure or how they adapt to startup/corporate culture.
+YOUR EXACT SCRIPT PROGRESSION (Track where you are based on history):
+TURN 0 (INTRO): Say exactly: "Go ahead and introduce yourself."
+TURN 1 (Phase 1 Q1 - Project Concept): Pick a specific project from their resume/code. "Great, let's dive in. First, let's talk about [Project 1]. Can you explain the core architecture or concept you used to build it?"
+TURN 2 (Phase 1 Q2 - Trade-off): Based on their resume, ask about a technical trade-off. "Okay, now in your [Project 2] or past role. Why did you decide to use [Tool/Concept they actually used] instead of an alternative?"
+TURN 3 (Phase 1 Q3 - Accomplishment/Failure): "I see. You mentioned [Real Accomplishment from Resume]. What led you to it, and what steps did you take to avoid failure or bottlenecks?"
+TURN 4 (TRANSITION GATE): Say exactly: "Rest easy now. Say yes or continue, and we will go over and improve what can be improved." (Wait for their yes)
+TURN 5 (Phase 2 Q4 - Missing Tech/Tooling): Look closely at their resume. DO NOT hallucinate tools they didn't use. Ask them to clarify a gap or missing piece of their tech stack for a specific project. (e.g., "I notice you built X, but didn't mention what database or state management you used. What was your stack?")
+TURN 6 (Phase 2 Q5 - Deployment/DevOps/Testing): If they lack CI/CD or deployment experience in their resume, ask them how they handled testing or deployment in their projects, rather than hallucinating specific tools.
+TURN 7 (Phase 2 Q6 - Career/Architecture): Ask a broad architectural question or career pivot question based *only* on their actual background.
+TURN 8 (CONCLUSION): Say exactly: "Thank you for participating in the mock interview, I will now output your changes and mistakes." (STOP AFTER THIS)
 
----
-### THE TRANSITION GATE (The Pivot)
-After asking 3 to 4 total questions across Phase 1 (or when candidate completes their defense), execute a clear transition gate:
-- Say EXACTLY: "Take a breath. Are you with me now? Say yes or continue, and we will go over and improve what can be improved."
-- DO NOT output Phase 2 recommendations until the candidate responds with "yes" or "continue".
-
----
-### PHASE 2: The Rebuild & Mock Interview (The Coach)
-Once the candidate confirms "yes" or "continue", drop the adversarial act and become their expert Career Coach.
-- CRITICAL: Rebuild their application using the EXACT SPOKEN DEFENSE ANSWERS they provided during Phase 1 voice interaction!
-- INTERACTIVE DELIVERABLE RULE: Deliver Phase 2 improvements ONE BY ONE.
-  - Turn 1 of Phase 2: State the 1st STAR resume patch derived directly from their spoken defense. Then ask: "Say continue to hear your second resume improvement."
-  - Turn 2 of Phase 2: State the 2nd STAR resume patch derived from their defense. Then ask: "Say continue for your interview playbook."
-  - Turn 3 of Phase 2: State the interview playbook response. Then ask: "Say report to view your complete battle audit report."
-
----
-### CRITICAL FORMATTING & TTS RULES
-- ABSOLUTELY NO MARKDOWN CHARACTERS like **, ##, #, *, or bracketed tags like [PHASE 1] in spoken responses. TTS engines pronounce them as "star star" or "pound pound". Write in clean, professional, plain spoken English.
-- Keep EVERY turn under 40 words so voice generation is fast and never drops audio.
+If the candidate says "I don't know" or stumbles, briefly acknowledge and proceed to the next question.
 """
 
 def get_chat_response(history, message, context):
     """Text chat UI upgraded to S.P.A.R.T.A. Two-Phase Interrogation Engine"""
     
-    system_prompt = f"{SPARTA_TWO_PHASE_PROMPT}\n\nCONTEXT & EVIDENCE:\n{context}"
+    system_prompt = f"{SPARTA_6_QUESTION_SCRIPT_PROMPT}\n\nCONTEXT & EVIDENCE:\n{context}"
     
     messages = [{"role": "system", "content": system_prompt}]
     
@@ -356,7 +338,7 @@ def reconstruct_resume(resume_text: str, spoken_transcript: str = "", context: s
 
     system_prompt = f"""
     You are S.P.A.R.T.A., an elite FAANG Technical Auditor and Interrogation Defense Evaluator.
-    Evaluate the candidate's spoken defense across their interrogation turns and compute a Verbal Defense Score.
+    Evaluate the candidate's spoken defense across their 2-Phase 6-Question interrogation and generate the Battle Audit Report.
 
     EVALUATION MODE: {evaluation_mode}
     {"[REPO-GROUNDED MODE]: Compare the candidate's spoken defense against actual source code evidence, architecture, and project gist provided in the audit context. Deduct points for generic hand-waving or claiming tools not present in code." if has_repo_code else "[RESUME-GROUNDED MODE]: Compare the candidate's spoken defense against specific claims, tools, metrics, and experience stated in their resume. Deduct points for vague buzzwords without operational depth."}
@@ -367,44 +349,57 @@ def reconstruct_resume(resume_text: str, spoken_transcript: str = "", context: s
     AUDIT CONTEXT / DATA:
     {json.dumps(context_data)[:4000] if context_data else "No additional context."}
 
-    ABSOLUTE RULES FOR BULLETS:
-    1. Use the candidate's actual voice defense answers to extract hidden technical depth, metrics, and explanations.
-    2. Use the XYZ Formula: Accomplished [X] as measured by [Y], by doing [Z].
-    3. Start every bullet with a Tier-1 action verb (e.g., Architected, Engineered, Spearheaded).
+    ABSOLUTE RULES FOR PHASE 1 MISTAKES:
+    1. Score Q1 (Project Concept), Q2 (Trade-off), and Q3 (Accomplishment/Failure) from 0-100 based on their defense.
+    2. If the user answered well, provide a compliment in 'feedback'. If they struggled, provide constructive critique and the "ideal/correct" technical answer.
+    3. If the user said "I don't know", "Not sure", or provided an incomplete non-answer, set 'is_unanswered' to true, and provide a 'failsafe_recommendation' (e.g., "Recommended: Revisit [Concept] required by target JD"). Otherwise, set 'failsafe_recommendation' to null.
+
+    ABSOLUTE RULES FOR PHASE 2 CORRECTIONS (BULLETS):
+    1. Synthesize 3 actionable resume bullets based heavily on what the candidate spoke about in Phase 2 (Q4, Q5, Q6) or Phase 1.
+    2. DYNAMIC BULLET BEHAVIOR: If the candidate exposed significant missing gaps (e.g. tools, tech stack, architecture), generate net-new bullet points to add to their resume. However, if the candidate had a very solid defense with few missing gaps, simply REPHRASE and ENHANCE their discussed points into highly ATS-compatible, impactful bullets.
+    3. Use the XYZ Formula (Accomplished X as measured by Y, by doing Z). Start with Tier-1 action verbs.
+    4. Assign each a relevant category (e.g., "Deployment & Tooling Stack", "ATS Enhancement", "Architectural Depth").
 
     Output strictly in this JSON format:
     {{
       "overall_defense_score": 82,
       "mode_evaluated": "{evaluation_mode}",
       "defense_verdict": "VERIFIED_ENGINEER",
-      "turn_scores": {{
-        "turn_1": {{
-          "score": 85,
-          "label": "Architecture & Implementation",
-          "feedback": "Demonstrated solid understanding of under-the-hood routing and controller structure."
-        }},
-        "turn_2": {{
-          "score": 78,
-          "label": "Tooling & Methodology Gaps",
-          "feedback": "Addressed missing automated testing frameworks and Docker setup."
-        }},
-        "turn_3": {{
-          "score": 90,
-          "label": "STAR Metric Verification",
-          "feedback": "Accurately defended the latency reduction claim with clear metrics."
-        }},
-        "turn_4": {{
-          "score": 80,
-          "label": "Pressure & Failure Resilience",
-          "feedback": "Good breakdown of edge case handling under production load."
-        }}
-      }},
-      "key_strengths": ["Clear verbal articulation of API choices", "Accurately defended throughput claims"],
-      "vulnerabilities_exposed": ["Slight hesitation on automated test coverage"],
-      "bullets": [
+      "phase1_mistakes": [
         {{
-          "original": "Short summary of claim or spoken defense",
-          "enhanced": "The FAANG-grade XYZ bullet patch built from their voice defense"
+          "question_label": "Q1: Project Concept",
+          "score": 85,
+          "is_unanswered": false,
+          "feedback": "Solid explanation of API routing. To improve, mention middleware error handling.",
+          "failsafe_recommendation": null
+        }},
+        {{
+          "question_label": "Q2: Library Trade-off",
+          "score": 40,
+          "is_unanswered": true,
+          "feedback": "Candidate struggled to explain ORM trade-offs.",
+          "failsafe_recommendation": "Recommended: Revisit SQLAlchemy connection pooling concepts required by target JD."
+        }},
+        {{
+          "question_label": "Q3: Accomplishment & Failure",
+          "score": 92,
+          "is_unanswered": false,
+          "feedback": "Outstanding breakdown of caching strategies!",
+          "failsafe_recommendation": null
+        }}
+      ],
+      "phase2_corrections": [
+        {{
+          "category": "Deployment & Tooling Stack",
+          "bullet": "Engineered automated CI/CD deployment pipelines using Docker and GitHub Actions..."
+        }},
+        {{
+          "category": "Architectural Depth",
+          "bullet": "Architected distributed queues with Redis to handle 500+ concurrent requests..."
+        }},
+        {{
+          "category": "Career Role Pivot",
+          "bullet": "Spearheaded technical leadership while maintaining hands-on IC architecture..."
         }}
       ]
     }}
